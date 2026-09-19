@@ -51,14 +51,32 @@ ejecutivo con los hallazgos.
      [19:07:08] ERROR   AD1l1: Puerto 80       Timed out           [111]
      ```
 
+   - **Implementado** (`log_sorter.py` + `main.py`): agrupa y ordena las líneas por cámara dentro
+     de cada `.log` (IP, Puerto, Imagen IA, Imagen cámara, Configuración, Tiempo de proceso, en
+     ese orden fijo), cámaras en orden alfabético, dejando intacto el encabezado/YAML/cierre.
+     `main.py` pide la fecha (`ddmmyy`) por consola y procesa todos los `.log` de ese día bajo
+     `Check Plants`. Hace un `.bak` antes de sobrescribir cada archivo. Validado contra los 14
+     `.log` reales del 18/09/2026 y corrido ya una vez sobre el disco real.
+   - Hallazgos al implementar:
+     - Algunos `.log` (ej. `APIMAN-FASE1` del cliente "Others") contienen **varias rondas** en un
+       solo archivo (una por puerto/zona escaneado: 12046, 12047, 13045, 13048), cada una con su
+       propio `YAML Read successful` / `Total de camaras` / cierre `====`. El sorter ya detecta y
+       ordena cada ronda por separado sin mezclarlas.
+     - El fin de línea varía entre archivos: los de AbInBev usan `LF`, el de `API-MANZANILLO` usa
+       `CRLF`. El sorter preserva el estilo original de cada archivo.
+     - Sí existe un log "por cliente" a nivel superior: `[Cliente]\[Mes]\[ddmmyy]\resumen_[fecha].log`
+       (ej. `AbInBev\09- Septiembre\180926\resumen_18-09-2026.log`), con un resumen agregado
+       (servidores revisados, cámaras con fallas por planta). Formato totalmente distinto (sin
+       timestamps por línea) — el sorter lo detecta automáticamente y lo deja intacto.
+     - Hay líneas `[ERROR] <ip>: ...` que no mencionan la cámara por nombre; se resuelven contra
+       la IP vista en esa misma ronda y ocupan el lugar de "Configuración". Cuando además existe
+       una línea posterior con nombre de cámara para el mismo campo (ej. reintento exitoso), esa
+       línea posterior es la que queda (se respeta el orden cronológico de resolución).
    - Preguntas abiertas:
-     - ¿"Ordenar" se refiere a recorrer/consolidar todos los `.log` de todas las plantas/servidores
-       de un día en un solo orden (ej. cronológico global), o a ordenar las líneas dentro de cada
-       log?
      - Cuando ya haya varios días acumulados, ¿el programa debe procesar solo el día más reciente,
        un rango de fechas, o todos los pendientes de procesar?
-     - ¿Hay un log "por cliente" a nivel superior o solo existen a nivel servidor/planta como se
-       observó?
+     - ¿El `resumen_[fecha].log` por cliente debe incorporarse al flujo (fases 3-5) o es solo
+       para referencia humana?
 
 2. **Comparación de imágenes de cámara**
    Para cada cámara, obtener la imagen actual y compararla contra una imagen base de referencia
