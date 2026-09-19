@@ -20,9 +20,9 @@ versiona). Copia `.env.example` y ajusta la ruta a tu entorno:
 copy .env.example .env
 ```
 
-| Variable            | Significado                                                                                   |
-|---------------------|------------------------------------------------------------------------------------------------|
-| `CHECK_PLANTS_ROOT`  | Carpeta raíz donde viven los `.log` e imágenes de revisión (ej. `D:\Imágenes\Quantum Labs\Check Plants`). Dentro de ella se espera la estructura `[Cliente]\[Mes]\[ddmmyy]\[Planta]\[Servidor]\`. |
+| Variable            | Significado                                                                                                                                                                                       |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CHECK_PLANTS_ROOT` | Carpeta raíz donde viven los `.log` e imágenes de revisión (ej. `D:\Imágenes\Quantum Labs\Check Plants`). Dentro de ella se espera la estructura `[Cliente]\[Mes]\[ddmmyy]\[Planta]\[Servidor]\`. |
 
 ## Uso
 
@@ -79,19 +79,19 @@ debe coincidir con el nombre de la carpeta dentro de `Check Plants`). Ejemplo re
 **`plant_order`** — cómo se ordenan entre sí los bloques de planta en la sección
 `DETALLE POR PLANTA - CÁMARAS CON FALLAS` del `resumen_[fecha].log`:
 
-| Valor | Significado |
-|---|---|
-| `"alpha"` (default) | Los bloques de planta van en orden alfabético por nombre de planta. |
+| Valor                    | Significado                                                                                                                                                                                                                        |
+| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `"alpha"` (default)      | Los bloques de planta van en orden alfabético por nombre de planta.                                                                                                                                                                |
 | `"lowest_server_number"` | Los bloques de planta van ordenados según el número más bajo de servidor que contengan (caso especial de AbInBev: una planta con los servidores 01 y 02 va antes que una con el servidor 03, sin importar el nombre de la planta). |
 
 **`servidor_order`** — cómo se ordenan los servidores entre sí dentro de una misma
 planta (aplica tanto al `resumen` como, indirectamente, a qué tan agrupados quedan
 sus `.log`):
 
-| Valor | Significado |
-|---|---|
-| `"alpha"` (default) | Orden alfabético por el nombre completo del servidor (ej. `APIMAN-FASE1` antes que `APIMAN-FASE2`). |
-| `"numeric_suffix"` | Orden por el número al final del nombre del servidor, ignorando el prefijo (ej. `QLYMSPROD01` antes que `QBYMSPROD07`, porque compara 01 contra 07; sirve para mezclar prefijos distintos como QBY/QLY en una sola secuencia numérica en vez de separarlos alfabéticamente). |
+| Valor               | Significado                                                                                                                                                                                                                                                                  |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `"alpha"` (default) | Orden alfabético por el nombre completo del servidor (ej. `APIMAN-FASE1` antes que `APIMAN-FASE2`).                                                                                                                                                                          |
+| `"numeric_suffix"`  | Orden por el número al final del nombre del servidor, ignorando el prefijo (ej. `QLYMSPROD01` antes que `QBYMSPROD07`, porque compara 01 contra 07; sirve para mezclar prefijos distintos como QBY/QLY en una sola secuencia numérica en vez de separarlos alfabéticamente). |
 
 Cuando una planta tiene más de un servidor, sus bloques de fallas quedan separados
 por una línea `====`.
@@ -99,10 +99,10 @@ por una línea `====`.
 **`camera_order`** — cómo se ordenan entre sí las cámaras dentro de cada ronda de
 un `.log` por servidor:
 
-| Valor | Significado |
-|---|---|
-| `"alpha"` (default) | Orden alfabético por el alias de la cámara. |
-| `"numeric_suffix"` | Orden por el número al final del alias, ignorando el prefijo. Soportado por el mismo mecanismo que `servidor_order`, aunque hoy ningún cliente lo necesita. |
+| Valor               | Significado                                                                                                                                                 |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `"alpha"` (default) | Orden alfabético por el alias de la cámara.                                                                                                                 |
+| `"numeric_suffix"`  | Orden por el número al final del alias, ignorando el prefijo. Soportado por el mismo mecanismo que `servidor_order`, aunque hoy ningún cliente lo necesita. |
 
 En todos los casos, dentro de cada servidor/cámara las fallas o campos quedan
 agrupados en este orden fijo: **Puerto 80 → Imagen IA → Imagen cámara →
