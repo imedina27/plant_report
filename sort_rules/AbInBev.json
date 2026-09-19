@@ -1,0 +1,5 @@
+{
+    "plant_order": "lowest_server_number",
+    "servidor_order": "numeric_suffix",
+    "camera_order": "alpha"
+}

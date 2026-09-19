@@ -8,6 +8,7 @@ cámara y las ordena, dejando intacto el encabezado y el cierre del archivo.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
@@ -19,6 +20,34 @@ from dotenv import load_dotenv
 load_dotenv()
 
 CHECK_PLANTS_ROOT = Path(os.environ["CHECK_PLANTS_ROOT"])
+SORT_RULES_DIR = Path(__file__).resolve().parent / "sort_rules"
+
+DEFAULT_SORT_CONFIG = {
+    "plant_order": "alpha",
+    "servidor_order": "alpha",
+    "camera_order": "alpha",
+}
+
+
+def load_client_config(client: str) -> dict:
+    """Reglas de ordenamiento para un cliente: default.json + overrides de
+    sort_rules/<cliente>.json si existe."""
+    config = dict(DEFAULT_SORT_CONFIG)
+    for name in ("default", client):
+        path = SORT_RULES_DIR / f"{name}.json"
+        if path.exists():
+            config.update(json.loads(path.read_text(encoding="utf-8")))
+    return config
+
+
+def _numeric_suffix_key(name: str) -> tuple[int, str]:
+    m = re.search(r"(\d+)$", name)
+    return (int(m.group(1)), name) if m else (10**9, name)
+
+
+def _sort_key(name: str, order: str):
+    return _numeric_suffix_key(name) if order == "numeric_suffix" else name
+
 
 LOG_LINE_RE = re.compile(r"^\[(?P<time>\d{2}:\d{2}:\d{2})\]\s+(?P<level>INFO|ERROR)\s+(?P<msg>.*)$")
 IP_MSG_RE = re.compile(r"^(?P<cam>\S+) IP: (?P<ip>\S+)$")
@@ -59,7 +88,7 @@ def _is_camera_line(msg: str) -> bool:
     return bool(field_match and _field_type(field_match.group("rest")))
 
 
-def _parse_camera_section(lines: list[str]) -> tuple[list[str], list[str]]:
+def _parse_camera_section(lines: list[str], camera_order: str = "alpha") -> tuple[list[str], list[str]]:
     parsed: list[tuple[str, str]] = []
     unrecognized: list[str] = []
     for raw in lines:
@@ -109,7 +138,7 @@ def _parse_camera_section(lines: list[str]) -> tuple[list[str], list[str]]:
     separator = "=" * 60 + ending
 
     ordered: list[str] = []
-    for name in sorted(cameras):
+    for name in sorted(cameras, key=lambda n: _sort_key(n, camera_order)):
         ordered.extend(cameras[name].ordered_lines())
         ordered.append(separator)
 
@@ -145,7 +174,7 @@ def _camera_line_mask(lines: list[str]) -> list[bool]:
     return mask
 
 
-def sort_log_text(text: str) -> str:
+def sort_log_text(text: str, camera_order: str = "alpha") -> str:
     """Reordena cada ronda de revisión de cámaras del log de forma independiente.
 
     Un .log puede contener más de una ronda (una por puerto/zona escaneado),
@@ -166,7 +195,7 @@ def sort_log_text(text: str) -> str:
         j = i
         while j < n and mask[j]:
             j += 1
-        ordered, unrecognized = _parse_camera_section(lines[i:j])
+        ordered, unrecognized = _parse_camera_section(lines[i:j], camera_order)
         if unrecognized:
             print(f"  Aviso: {len(unrecognized)} línea(s) sin reconocer se conservaron al final de una ronda de cámaras.")
         result_lines.extend(ordered)
@@ -176,10 +205,110 @@ def sort_log_text(text: str) -> str:
     return "".join(l if l.endswith("\n") else l + "\n" for l in result_lines)
 
 
-def sort_log_file(path: Path) -> bool:
+RESUMEN_DETAIL_HEADING = "DETALLE POR PLANTA - CÁMARAS CON FALLAS"
+RESUMEN_ENTRY_RE = re.compile(r"^\s*-\s*\[(?P<servidor>[^\]]+)\]\s+(?P<alias>\S+)\s+\S+\s+(?P<campo>.+)$")
+RESUMEN_PLANT_HEADER_RE = re.compile(r"^(?P<planta>\S[^:]*):$")
+
+
+def sort_resumen_text(text: str, plant_order: str = "alpha", servidor_order: str = "alpha") -> str:
+    """Reordena la sección 'DETALLE POR PLANTA - CÁMARAS CON FALLAS' del resumen.
+
+    Agrupa por planta y, dentro de cada planta, por servidor (separados por
+    '====' cuando hay más de uno); dentro de cada servidor, las fallas quedan
+    agrupadas por campo (Puerto 80, Imagen IA, Imagen cámara, Configuración,
+    Tiempo de proceso) y ordenadas alfabéticamente por alias de cámara.
+
+    plant_order:
+      - "alpha": los bloques de planta van alfabéticos por nombre de planta.
+      - "lowest_server_number": van ordenados por el número más bajo de
+        servidor que contengan (caso especial de AbInBev).
+    servidor_order:
+      - "alpha": servidores en orden alfabético por su nombre completo.
+      - "numeric_suffix": por el número al final del nombre del servidor,
+        ignorando el prefijo (ej. QBYMSPROD07 antes que QLYMSPROD01).
+
+    Todo lo anterior al encabezado de esta sección se deja intacto.
+    """
+    lines = text.splitlines(keepends=True)
+    heading_idx = next(
+        (i for i, l in enumerate(lines) if l.rstrip("\r\n") == RESUMEN_DETAIL_HEADING), None
+    )
+    if heading_idx is None:
+        return text
+
+    head = lines[: heading_idx + 1]
+    body = lines[heading_idx + 1 :]
+    ending = "\r\n" if any(raw.endswith("\r\n") for raw in lines) else "\n"
+
+    current_planta: str | None = None
+    server_planta: dict[str, str] = {}
+    server_entries: dict[str, list[str]] = {}
+    for raw in body:
+        stripped = raw.rstrip("\r\n")
+        if not stripped.strip():
+            continue
+        entry_match = RESUMEN_ENTRY_RE.match(stripped)
+        if entry_match:
+            servidor = entry_match.group("servidor")
+            server_planta.setdefault(servidor, current_planta or servidor)
+            server_entries.setdefault(servidor, []).append(raw)
+            continue
+        plant_match = RESUMEN_PLANT_HEADER_RE.match(stripped)
+        if plant_match:
+            current_planta = plant_match.group("planta")
+
+    if not server_entries:
+        return text
+
+    separator = "=" * 42 + ending
+
+    planta_servers: dict[str, list[str]] = {}
+    for servidor, planta in server_planta.items():
+        planta_servers.setdefault(planta, []).append(servidor)
+    for servers in planta_servers.values():
+        servers.sort(key=lambda s: _sort_key(s, servidor_order))
+
+    if plant_order == "lowest_server_number":
+        planta_key = lambda planta: min(_numeric_suffix_key(s) for s in planta_servers[planta])
+    else:
+        planta_key = lambda planta: planta
+    ordered_plantas = sorted(planta_servers, key=planta_key)
+
+    out: list[str] = list(head)
+    for idx, planta in enumerate(ordered_plantas):
+        if idx > 0:
+            out.append(ending)
+        out.append(f"{planta}:{ending}")
+
+        for s_idx, servidor in enumerate(planta_servers[planta]):
+            if s_idx > 0:
+                out.append(separator)
+
+            by_field: dict[str, list[tuple[str, str]]] = {}
+            for raw in server_entries[servidor]:
+                m = RESUMEN_ENTRY_RE.match(raw.rstrip("\r\n"))
+                ftype = _field_type(m.group("campo")) or "otro"
+                by_field.setdefault(ftype, []).append((m.group("alias"), raw))
+
+            for ftype in [*FIELD_ORDER, "otro"]:
+                for _alias, raw in sorted(by_field.get(ftype, []), key=lambda t: t[0]):
+                    out.append(raw)
+
+    return "".join(l if l.endswith(("\n", "\r\n")) else l + ending for l in out)
+
+
+def sort_log_file(path: Path, config: dict | None = None) -> bool:
     """Reordena un .log en su lugar. Devuelve True si el contenido cambió."""
+    config = config or DEFAULT_SORT_CONFIG
     original = path.read_text(encoding="utf-8", newline="")
-    sorted_text = sort_log_text(original)
+    if path.name.startswith("resumen_"):
+        sorted_text = sort_resumen_text(
+            original,
+            plant_order=config["plant_order"],
+            servidor_order=config["servidor_order"],
+        )
+    else:
+        sorted_text = sort_log_text(original, camera_order=config["camera_order"])
     if sorted_text == original:
         return False
     backup_path = path.with_suffix(path.suffix + ".bak")
@@ -195,7 +324,10 @@ def sort_logs_for_date(date_str: str, root: Path = CHECK_PLANTS_ROOT) -> None:
         return
 
     print(f"Encontrados {len(log_paths)} archivo(s) .log para la fecha {date_str}.")
+    config_cache: dict[str, dict] = {}
     for log_path in log_paths:
-        changed = sort_log_file(log_path)
+        client = log_path.relative_to(root).parts[0]
+        config = config_cache.setdefault(client, load_client_config(client))
+        changed = sort_log_file(log_path, config)
         status = "ordenado" if changed else "sin cambios"
         print(f"  - {log_path.relative_to(root)}: {status}")
