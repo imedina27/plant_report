@@ -99,9 +99,13 @@ def _parse_camera_section(lines: list[str]) -> tuple[list[str], list[str]]:
 
         unrecognized.append(raw)
 
+    ending = "\r\n" if any(raw.endswith("\r\n") for raw in lines) else "\n"
+    separator = "=" * 60 + ending
+
     ordered: list[str] = []
     for name in sorted(cameras):
         ordered.extend(cameras[name].ordered_lines())
+        ordered.append(separator)
 
     return ordered, unrecognized
 
