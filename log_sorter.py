@@ -8,17 +8,23 @@ cámara y las ordena, dejando intacto el encabezado y el cierre del archivo.
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
-CHECK_PLANTS_ROOT = Path(r"D:\Imágenes\Quantum Labs\Check Plants")
+from dotenv import load_dotenv
+
+load_dotenv()
+
+CHECK_PLANTS_ROOT = Path(os.environ["CHECK_PLANTS_ROOT"])
 
 LOG_LINE_RE = re.compile(r"^\[(?P<time>\d{2}:\d{2}:\d{2})\]\s+(?P<level>INFO|ERROR)\s+(?P<msg>.*)$")
 IP_MSG_RE = re.compile(r"^(?P<cam>\S+) IP: (?P<ip>\S+)$")
 FIELD_MSG_RE = re.compile(r"^(?P<cam>\S+):\s+(?P<rest>.+)$")
 ANON_ERROR_MSG_RE = re.compile(r"^\[ERROR\]\s+(?P<ip>\S+):\s+(?P<detail>.+)$")
+SEPARATOR_ONLY_RE = re.compile(r"^=+$")
 
 FIELD_ORDER = ["ip", "puerto", "imagen_ia", "imagen_camara", "configuracion", "tiempo"]
 
@@ -58,7 +64,7 @@ def _parse_camera_section(lines: list[str]) -> tuple[list[str], list[str]]:
     unrecognized: list[str] = []
     for raw in lines:
         line = raw.rstrip("\r\n")
-        if not line.strip():
+        if not line.strip() or SEPARATOR_ONLY_RE.match(line):
             continue
         m = LOG_LINE_RE.match(line)
         if not m:
@@ -111,10 +117,31 @@ def _parse_camera_section(lines: list[str]) -> tuple[list[str], list[str]]:
 
 
 def _camera_line_mask(lines: list[str]) -> list[bool]:
-    mask = []
+    raw_mask: list[bool] = []
+    is_sep: list[bool] = []
     for raw in lines:
-        m = LOG_LINE_RE.match(raw.rstrip("\r\n"))
-        mask.append(bool(m and _is_camera_line(m.group("msg"))))
+        stripped = raw.rstrip("\r\n")
+        if SEPARATOR_ONLY_RE.match(stripped):
+            raw_mask.append(False)
+            is_sep.append(True)
+            continue
+        m = LOG_LINE_RE.match(stripped)
+        raw_mask.append(bool(m and _is_camera_line(m.group("msg"))))
+        is_sep.append(False)
+
+    # A bare "====" separator only counts as part of a camera run when it sits
+    # strictly between two real camera lines (i.e. one we added on a previous
+    # sort). Otherwise it belongs to unrelated content (e.g. resumen_*.log's
+    # own dividers) and must be left untouched.
+    mask = list(raw_mask)
+    n = len(lines)
+    for i in range(n):
+        if not is_sep[i]:
+            continue
+        before = next((k for k in range(i - 1, -1, -1) if lines[k].strip()), None)
+        after = next((k for k in range(i + 1, n) if lines[k].strip()), None)
+        if (before is not None and raw_mask[before]) or (after is not None and raw_mask[after]):
+            mask[i] = True
     return mask
 
 
