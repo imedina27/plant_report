@@ -9,9 +9,13 @@ ejecutivo con los hallazgos.
 
 ## Flujo de alto nivel
 
-1. **Ingesta y ordenamiento de logs**
-   Leer los logs existentes de revisión de plantas y ordenarlos (criterio por definir: fecha,
-   planta, cámara, etc.).
+1. **Ingesta de logs**
+   Leer los logs existentes de revisión de plantas.
+   - Decidido (cambio de alcance, 19/09/2026): el **ordenamiento de los `.log` ya no es
+     responsabilidad de este proyecto**. El programa de revisión de cámaras (externo a este repo)
+     ahora hace el ordenamiento por cámara/servidor él mismo, antes de que el archivo llegue aquí.
+     Por eso se eliminaron `log_sorter.py`, `sort_rules/` y el flujo de `main.py` que los usaba —
+     este proyecto ahora asume que recibe los `.log` ya ordenados y arranca desde la Fase 2.
    - Decidido: los logs son archivos de texto plano con extensión `.log`.
    - Decidido: ubicación y estructura real de carpetas (confirmada explorando el disco):
 
@@ -51,27 +55,18 @@ ejecutivo con los hallazgos.
      [19:07:08] ERROR   AD1l1: Puerto 80       Timed out           [111]
      ```
 
-   - **Implementado** (`log_sorter.py` + `main.py`): agrupa y ordena las líneas por cámara dentro
-     de cada `.log` (IP, Puerto, Imagen IA, Imagen cámara, Configuración, Tiempo de proceso, en
-     ese orden fijo), cámaras en orden alfabético, dejando intacto el encabezado/YAML/cierre.
-     `main.py` pide la fecha (`ddmmyy`) por consola y procesa todos los `.log` de ese día bajo
-     `Check Plants`. Hace un `.bak` antes de sobrescribir cada archivo. Validado contra los 14
-     `.log` reales del 18/09/2026 y corrido ya una vez sobre el disco real.
-   - Hallazgos al implementar:
-     - Algunos `.log` (ej. `APIMAN-FASE1` del cliente "Others") contienen **varias rondas** en un
-       solo archivo (una por puerto/zona escaneado: 12046, 12047, 13045, 13048), cada una con su
-       propio `YAML Read successful` / `Total de camaras` / cierre `====`. El sorter ya detecta y
-       ordena cada ronda por separado sin mezclarlas.
+   - Notas de contexto que siguen vigentes (aprendidas mientras se construía el sorter, aunque
+     ese código ya no viva aquí):
+     - Algunos `.log` (ej. `APIMAN-FASE1` del cliente "Others") pueden contener **varias rondas**
+       en un solo archivo (una por puerto/zona escaneado), cada una con su propio
+       `YAML Read successful` / `Total de camaras` / cierre `====`.
      - El fin de línea varía entre archivos: los de AbInBev usan `LF`, el de `API-MANZANILLO` usa
-       `CRLF`. El sorter preserva el estilo original de cada archivo.
-     - Sí existe un log "por cliente" a nivel superior: `[Cliente]\[Mes]\[ddmmyy]\resumen_[fecha].log`
+       `CRLF`. Cualquier código que toque estos `.log` (ej. Fase 3, al agregar resultados) debe
+       tolerar ambos.
+     - Existe un log "por cliente" a nivel superior: `[Cliente]\[Mes]\[ddmmyy]\resumen_[fecha].log`
        (ej. `AbInBev\09- Septiembre\180926\resumen_18-09-2026.log`), con un resumen agregado
-       (servidores revisados, cámaras con fallas por planta). Formato totalmente distinto (sin
-       timestamps por línea) — el sorter lo detecta automáticamente y lo deja intacto.
-     - Hay líneas `[ERROR] <ip>: ...` que no mencionan la cámara por nombre; se resuelven contra
-       la IP vista en esa misma ronda y ocupan el lugar de "Configuración". Cuando además existe
-       una línea posterior con nombre de cámara para el mismo campo (ej. reintento exitoso), esa
-       línea posterior es la que queda (se respeta el orden cronológico de resolución).
+       (servidores revisados, cámaras con fallas por planta). Formato totalmente distinto al de
+       los `.log` por servidor (sin timestamps por línea).
    - Preguntas abiertas:
      - Cuando ya haya varios días acumulados, ¿el programa debe procesar solo el día más reciente,
        un rango de fechas, o todos los pendientes de procesar?
@@ -142,7 +137,7 @@ ejecutivo con los hallazgos.
 
 ## Estado
 
-- [ ] Fase 1 definida
+- [x] Fase 1 fuera de alcance (ordenamiento lo hace el programa de revisión externo)
 - [ ] Fase 2 definida
 - [ ] Fase 3 definida
 - [ ] Fase 4 definida
