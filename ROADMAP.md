@@ -88,17 +88,35 @@ Notas a tener en cuenta en cualquier código que lea o escriba estos `.log`:
      - Cuando ya haya varios días acumulados, ¿el programa debe procesar solo el día más reciente,
        un rango de fechas, o todos los pendientes de procesar?
 
-2. **Actualización del log**
+2. **Comparación de archivos JSON de configuración de las cámaras**
+   Para cada cámara, comparar su `[CAMARA].json` (dump de configuración VAPIX) actual contra una
+   referencia base, para detectar cambios de configuración no autorizados/inesperados.
+   - Decidido: los archivos se obtienen de la misma carpeta descrita arriba (`[CAMARA].json` por
+     servidor/planta/día).
+   - Preguntas abiertas:
+     - El JSON tiene cientos de campos (incluye contadores, timestamps, IDs de sesión, etc. que
+       cambian solos sin indicar un problema real) — ¿se compara el archivo completo o solo un
+       subconjunto de campos relevantes (ej. red, resolución, marca/modelo, rotación)?
+     - ¿Dónde vive o cómo se define el JSON "base" de referencia? (mismo problema que con la
+       imagen base de la Fase 1 — no se encontró ninguna carpeta de referencia en el disco)
+     - ¿Esto lo hace el mismo sistema existente de comparación de imágenes, o es lógica nueva?
+     - El `.log` ya tiene una línea `Configuración: OK/Timed out` que solo indica si se pudo
+       *descargar* el JSON, no si su contenido cambió respecto a la base — ¿el resultado de esta
+       comparación se registra como un campo nuevo, o se reutiliza/reemplaza ese existente?
+     - ¿Qué se considera un cambio "relevante" a reportar vs. ruido a ignorar?
+
+3. **Actualización del log**
    Completar el log original con los resultados de la comparación (por cámara).
    - Decidido: se sobrescribe el `.log` original agregándole las líneas con el resultado de la
      comparación (no se genera un archivo aparte).
    - Preguntas abiertas:
      - ¿Qué campos/formato exacto se deben agregar (ej. `[HH:MM:SS] INFO <CAMARA>: Comparación
-       con base OK/MOVIDA [score]`, siguiendo el mismo estilo del log actual)?
+       con base OK/MOVIDA [score]`, siguiendo el mismo estilo del log actual)? ¿Aplica igual para
+       el resultado de la comparación de imagen y el de configuración (Fases 1 y 2)?
      - ¿Qué pasa si el programa se corre más de una vez sobre el mismo log (evitar duplicar
        líneas de resultado)?
 
-3. **Persistencia en base de datos**
+4. **Persistencia en base de datos**
    Guardar los resultados (logs + comparaciones) en una base de datos.
    - Decidido: PostgreSQL, ya hay un servidor disponible.
    - Preguntas abiertas:
@@ -107,7 +125,7 @@ Notas a tener en cuenta en cualquier código que lea o escriba estos `.log`:
      - ¿Ya existe un esquema o hay que diseñarlo desde cero?
      - ¿Se necesita conservar histórico de todas las corridas o solo el estado más reciente?
 
-4. **Reporte ejecutivo**
+5. **Reporte ejecutivo**
    Generar un reporte ejecutivo con los resultados.
    - Decidido: formato PDF, generación diaria (automática).
    - Decidido: reporte detallado por planta, dirigido a Gerencia de Operaciones.
@@ -133,6 +151,7 @@ Notas a tener en cuenta en cualquier código que lea o escriba estos `.log`:
 ## Estado
 
 - [ ] Fase 1 definida (comparación de imágenes)
-- [ ] Fase 2 definida (actualización del log)
-- [ ] Fase 3 definida (persistencia en base de datos)
-- [ ] Fase 4 definida (reporte ejecutivo)
+- [ ] Fase 2 definida (comparación de JSON de configuración)
+- [ ] Fase 3 definida (actualización del log)
+- [ ] Fase 4 definida (persistencia en base de datos)
+- [ ] Fase 5 definida (reporte ejecutivo)
