@@ -24,13 +24,20 @@ D:\Imágenes\Quantum Labs\Check Plants\
           [SERVIDOR]\            (ej. QLYMSPROD03)
             [SERVIDOR].log       (log de la corrida completa de ese servidor/planta)
             [CAMARA].jpg         (imagen cruda tomada de la cámara)
-            [CAMARA].json        (dump completo de configuración VAPIX de la cámara, Axis)
+            [CAMARA].json        (dump completo de configuración de la cámara; el esquema
+                                   depende del fabricante — ver nota de marcas más abajo)
             [CAMARA]_ai.jpg      (imagen procesada/anotada, probablemente salida de IA)
 ```
 
 Con datos de ejemplo (18/09/2026): 2 clientes, 10 plantas, 11 servidores, 399 imágenes .jpg,
 14 archivos .log. Solo existe la carpeta del día actual (no hay histórico de días previos en
 este disco todavía).
+
+Para desarrollo/pruebas hay un mirror local de esta misma estructura en `Test/Check Plants/`
+dentro del repo (con datos reales pero desconectado de producción), que el usuario va subiendo
+manualmente con logs de días nuevos. Esa carpeta está en `.gitignore` (es desechable, no se
+versiona) — cualquier código que lea `CHECK_PLANTS_ROOT` debe poder apuntar tanto a la ruta real
+(`D:\Imágenes\Quantum Labs\Check Plants`) como a esta carpeta de prueba vía `.env`.
 
 El `.log` es un log de proceso con timestamp y nivel (INFO/ERROR), que registra, por servidor:
 apertura de túneles SSH, ping, y por cada cámara: IP, verificación de puerto 80, obtención de
@@ -61,6 +68,16 @@ Notas a tener en cuenta en cualquier código que lea o escriba estos `.log`:
   (ej. `AbInBev\09- Septiembre\180926\resumen_18-09-2026.log`), con un resumen agregado
   (servidores revisados, cámaras con fallas por planta). Formato totalmente distinto al de los
   `.log` por servidor (sin timestamps por línea).
+  - Actualización (22/09/2026): el formato de este `resumen_[fecha].log` cambió — ahora agrega,
+    antes de la sección `DETALLE POR PLANTA - CÁMARAS CON FALLAS` de siempre, una sección nueva
+    **`DETALLE POR SERVIDOR`**: una tabla con un estado por servidor (`[OK]`, `[CON FALLAS]`,
+    `[SIN YAML]`), la planta, el nombre del servidor, y "X/Y cámaras completas".
+  - El estado `[SIN YAML]` es nuevo: significa que ese servidor no pudo ni siquiera leer su lista
+    de cámaras ese día (ej. `ERROR YAML Connection error [410]` en su `.log`), así que no tiene
+    ninguna cámara (ni `.jpg` ni `.json`) esa corrida. Cualquier código que recorra cámaras por
+    servidor debe tolerar servidores sin ninguna cámara.
+  - El `.log` por servidor/cámara también llega pre-ordenado por cámara desde el programa de
+    revisión (ya no es responsabilidad de este proyecto, ver nota al inicio del documento).
 
 ## Flujo de alto nivel
 
@@ -89,14 +106,33 @@ Notas a tener en cuenta en cualquier código que lea o escriba estos `.log`:
        un rango de fechas, o todos los pendientes de procesar?
 
 2. **Comparación de archivos JSON de configuración de las cámaras**
-   Para cada cámara, comparar su `[CAMARA].json` (dump de configuración VAPIX) actual contra una
+   Para cada cámara, comparar su `[CAMARA].json` (dump de configuración) actual contra una
    referencia base, para detectar cambios de configuración no autorizados/inesperados.
    - Decidido: los archivos se obtienen de la misma carpeta descrita arriba (`[CAMARA].json` por
      servidor/planta/día).
+   - **Importante — múltiples fabricantes, con crecimiento esperado** (confirmado 22/09/2026
+     explorando `Test/Check Plants`): el `.json` **no tiene un esquema único**, depende de la
+     marca de la cámara. Hoy conviven al menos estas 4, incluso dentro de un mismo servidor:
+     - **AXIS** (VAPIX): raíz con claves como `Audio`, `Brand`, `ImageSource`, etc.
+     - **HIKVISION**: raíz `DeviceInfo` con namespace XML `hikvision.com` (el dump es XML
+       convertido a JSON).
+     - **DAHUA**
+     - **VIVOTEK**
+     - Se espera que aparezcan más marcas a futuro — la lógica de comparación debe diseñarse
+       para que agregar una marca nueva sea configuración/extensión, no reescribir el core (mismo
+       principio que se usó antes para las reglas de ordenamiento por cliente, aunque ese código
+       ya no exista en este repo).
+     - Falta inspeccionar ejemplos reales de DAHUA y VIVOTEK (por ahora solo se confirmó AXIS e
+       HIKVISION en los datos de prueba) para saber qué tan distintos son sus esquemas.
    - Preguntas abiertas:
      - El JSON tiene cientos de campos (incluye contadores, timestamps, IDs de sesión, etc. que
        cambian solos sin indicar un problema real) — ¿se compara el archivo completo o solo un
-       subconjunto de campos relevantes (ej. red, resolución, marca/modelo, rotación)?
+       subconjunto de campos relevantes (ej. red, resolución, marca/modelo, rotación)? Esto
+       probablemente deba definirse **por marca**, ya que los campos relevantes no se van a
+       llamar igual entre fabricantes.
+     - ¿Cómo se identifica la marca de una cámara a partir de su `.json` (una clave raíz distinta
+       por marca, un campo `Brand`/`deviceName` a nivel superior, o hay que mantener una lista de
+       heurísticas por fabricante)?
      - ¿Dónde vive o cómo se define el JSON "base" de referencia? (mismo problema que con la
        imagen base de la Fase 1 — no se encontró ninguna carpeta de referencia en el disco)
      - ¿Esto lo hace el mismo sistema existente de comparación de imágenes, o es lógica nueva?
