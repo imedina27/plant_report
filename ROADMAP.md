@@ -79,6 +79,27 @@ Notas a tener en cuenta en cualquier código que lea o escriba estos `.log`:
   - El `.log` por servidor/cámara también llega pre-ordenado por cámara desde el programa de
     revisión (ya no es responsabilidad de este proyecto, ver nota al inicio del documento).
 
+## Diagrama de flujo
+
+```mermaid
+flowchart TD
+    A["Programa de revisión de cámaras (externo)<br/>ordena los .log y genera .jpg / .json / resumen_fecha.log"]
+    A --> B["Por cada cliente → planta → servidor → cámara"]
+
+    B --> C["Fase 1: Comparar [CAMARA].jpg actual<br/>contra imagen base"]
+    B --> D["Fase 2: Comparar [CAMARA].json actual<br/>contra config base<br/>(lógica según marca: AXIS / HIKVISION / DAHUA / VIVOTEK / ...)"]
+
+    C --> E["Fase 3: Agregar resultado de ambas<br/>comparaciones al .log de esa cámara"]
+    D --> E
+
+    E --> F{"¿Ya se procesaron<br/>todas las cámaras del día?"}
+    F -- No --> B
+    F -- Sí --> G["Fase 4: Persistir resultados<br/>en PostgreSQL"]
+
+    G --> H["Fase 5: Generar reporte ejecutivo<br/>(PDF diario, por planta)"]
+    H --> I["Entregar a Gerencia de Operaciones"]
+```
+
 ## Flujo de alto nivel
 
 1. **Comparación de imágenes de cámara**
