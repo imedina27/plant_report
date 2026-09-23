@@ -2,13 +2,14 @@
 
 ## Objetivo general
 
-Automatizar la revisión de plantas: validar que las cámaras de cada planta no se hayan movido
-(comparando contra una imagen base), completar el log con el resultado de esa validación,
-persistir todo en una base de datos y generar un reporte ejecutivo con los hallazgos.
+Automatizar la revisión de plantas: validar que la configuración de cada cámara no haya cambiado
+y que no se haya movido (comparando su `.json` y su imagen contra una referencia base), completar
+el log con el resultado de esas validaciones, persistir todo en una base de datos, generar un
+reporte ejecutivo con los hallazgos y enviarlo por correo a los destinatarios designados.
 
 > El ordenamiento de los `.log` de revisión **no** es parte de este proyecto: lo hace el programa
 > de revisión de cámaras (externo a este repo) antes de que los archivos lleguen aquí. Este
-> proyecto asume que recibe los `.log` ya ordenados y arranca desde la comparación de imágenes.
+> proyecto asume que recibe los `.log` ya ordenados y arranca desde la comparación de cámaras.
 
 ## Estructura de datos (contexto)
 
@@ -86,8 +87,8 @@ flowchart TD
     A["Programa de revisión de cámaras (externo)<br/>ordena los .log y genera .jpg / .json / resumen_fecha.log"]
     A --> B["Por cada cliente → planta → servidor → cámara"]
 
-    B --> C["Fase 1: Comparar [CAMARA].jpg actual<br/>contra imagen base"]
-    B --> D["Fase 2: Comparar [CAMARA].json actual<br/>contra config base<br/>(lógica según marca: AXIS / HIKVISION / DAHUA / VIVOTEK / ...)"]
+    B --> C["Fase 1: Comparar [CAMARA].json actual<br/>contra config base<br/>(lógica según marca: AXIS / HIKVISION / DAHUA / VIVOTEK / ...)"]
+    B --> D["Fase 2: Comparar [CAMARA].jpg actual<br/>contra imagen base"]
 
     C --> E["Fase 3: Agregar resultado de ambas<br/>comparaciones al .log de esa cámara"]
     D --> E
@@ -97,39 +98,15 @@ flowchart TD
     F -- Sí --> G["Fase 4: Persistir resultados<br/>en PostgreSQL"]
 
     G --> H["Fase 5: Generar reporte ejecutivo<br/>(PDF diario, por planta)"]
-    H --> I["Entregar a Gerencia de Operaciones"]
+    H --> I["Fase 6: Enviar por correo el PDF<br/>a los destinatarios designados"]
 ```
 
 ## Flujo de alto nivel
 
-1. **Comparación de imágenes de cámara**
-   Para cada cámara, obtener la imagen actual y compararla contra una imagen base de referencia
-   para detectar si la cámara se movió.
-   - Decidido: las imágenes se obtienen de la carpeta descrita arriba (`[CAMARA].jpg` por
-     servidor/planta/día).
-   - Decidido: ya existe un sistema Python que hace esta comparación. Pendiente que el usuario
-     comparta el código para revisarlo, mejorarlo e integrarlo a este proyecto (en vez de
-     construir la lógica de comparación desde cero).
-   - Decidido: `[CAMARA]_ai.jpg` es la salida de un sistema de IA ya existente (a reutilizar,
-     no a reconstruir). Falta confirmar con el script existente qué hace exactamente y si se
-     relaciona con la comparación contra la imagen base.
-   - Preguntas abiertas:
-     - ¿Dónde está el script/proyecto existente? (ruta local, repo, etc.) — el usuario lo
-       compartirá cuando lleguemos a esta fase.
-     - No se encontró ninguna carpeta de "imagen base"/referencia en el disco explorado — ¿dónde
-       vive o cómo se define? (¿la maneja el script existente, es la primera imagen capturada de
-       cada cámara, o se cura manualmente?)
-     - ¿Cuántas cámaras totales se manejan? (ejemplo visto: ~11-12 cámaras por servidor, 11
-       servidores activos ese día)
-     - ¿El sistema existente ya define un umbral/método de sensibilidad, o también está pendiente
-       de ajustar?
-     - Cuando ya haya varios días acumulados, ¿el programa debe procesar solo el día más reciente,
-       un rango de fechas, o todos los pendientes de procesar?
-
-2. **Comparación de archivos JSON de configuración de las cámaras**
+1. **Comparación de archivos JSON de configuración de las cámaras**
    Para cada cámara, comparar su `[CAMARA].json` (dump de configuración) actual contra una
    referencia base, para detectar cambios de configuración no autorizados/inesperados.
-   - Decidido: los archivos se obtienen de la misma carpeta descrita arriba (`[CAMARA].json` por
+   - Decidido: los archivos se obtienen de la carpeta descrita arriba (`[CAMARA].json` por
      servidor/planta/día).
    - **Importante — múltiples fabricantes, con crecimiento esperado** (confirmado 22/09/2026
      explorando `Test/Check Plants`): el `.json` **no tiene un esquema único**, depende de la
@@ -155,12 +132,36 @@ flowchart TD
        por marca, un campo `Brand`/`deviceName` a nivel superior, o hay que mantener una lista de
        heurísticas por fabricante)?
      - ¿Dónde vive o cómo se define el JSON "base" de referencia? (mismo problema que con la
-       imagen base de la Fase 1 — no se encontró ninguna carpeta de referencia en el disco)
+       imagen base de la Fase 2 — no se encontró ninguna carpeta de referencia en el disco)
      - ¿Esto lo hace el mismo sistema existente de comparación de imágenes, o es lógica nueva?
      - El `.log` ya tiene una línea `Configuración: OK/Timed out` que solo indica si se pudo
        *descargar* el JSON, no si su contenido cambió respecto a la base — ¿el resultado de esta
        comparación se registra como un campo nuevo, o se reutiliza/reemplaza ese existente?
      - ¿Qué se considera un cambio "relevante" a reportar vs. ruido a ignorar?
+
+2. **Comparación de imágenes de cámara**
+   Para cada cámara, obtener la imagen actual y compararla contra una imagen base de referencia
+   para detectar si la cámara se movió.
+   - Decidido: las imágenes se obtienen de la carpeta descrita arriba (`[CAMARA].jpg` por
+     servidor/planta/día).
+   - Decidido: ya existe un sistema Python que hace esta comparación. Pendiente que el usuario
+     comparta el código para revisarlo, mejorarlo e integrarlo a este proyecto (en vez de
+     construir la lógica de comparación desde cero).
+   - Decidido: `[CAMARA]_ai.jpg` es la salida de un sistema de IA ya existente (a reutilizar,
+     no a reconstruir). Falta confirmar con el script existente qué hace exactamente y si se
+     relaciona con la comparación contra la imagen base.
+   - Preguntas abiertas:
+     - ¿Dónde está el script/proyecto existente? (ruta local, repo, etc.) — el usuario lo
+       compartirá cuando lleguemos a esta fase.
+     - No se encontró ninguna carpeta de "imagen base"/referencia en el disco explorado — ¿dónde
+       vive o cómo se define? (¿la maneja el script existente, es la primera imagen capturada de
+       cada cámara, o se cura manualmente?)
+     - ¿Cuántas cámaras totales se manejan? (ejemplo visto: ~11-12 cámaras por servidor, 11
+       servidores activos ese día)
+     - ¿El sistema existente ya define un umbral/método de sensibilidad, o también está pendiente
+       de ajustar?
+     - Cuando ya haya varios días acumulados, ¿el programa debe procesar solo el día más reciente,
+       un rango de fechas, o todos los pendientes de procesar?
 
 3. **Actualización del log**
    Completar el log original con los resultados de la comparación (por cámara).
@@ -193,10 +194,23 @@ flowchart TD
        comparativas históricas)?
      - ¿Cómo se dispara la generación diaria (tarea programada/cron, servicio corriendo en
        segundo plano)?
-     - ¿El reporte se envía a alguien (correo) o solo se guarda en una ubicación?
      - ¿Existe una plantilla o identidad visual corporativa a seguir?
      - ¿El `resumen_[fecha].log` por cliente debe incorporarse a este reporte o es solo para
        referencia humana?
+
+6. **Enviar correo con el reporte**
+   Enviar por correo el PDF generado en la Fase 5 a las personas designadas para recibirlo.
+   - Decidido: el correo debe llevar la estructura/identidad de la empresa (firma, pie de página
+     corporativo, etc.), no un correo genérico sin formato.
+   - Preguntas abiertas:
+     - ¿Quiénes son los destinatarios? ¿Una lista fija, o varía por cliente/planta (ej. cada
+       cliente recibe solo el reporte de sus propias plantas)?
+     - ¿Con qué servidor/servicio de correo se envía (SMTP corporativo, algún proveedor externo)?
+       ¿Dónde se guardan esas credenciales (`.env`)?
+     - ¿Existe ya una plantilla de correo/firma corporativa (HTML) a reutilizar, o hay que
+       diseñarla?
+     - ¿Qué pasa si el envío falla (reintentos, aviso a alguien, quedar registrado en el log)?
+     - ¿Va en copia alguien fijo (ej. Gerencia general, el equipo de Quantum Labs)?
 
 ## Preguntas generales de ejecución
 
@@ -207,8 +221,9 @@ flowchart TD
 
 ## Estado
 
-- [ ] Fase 1 definida (comparación de imágenes)
-- [ ] Fase 2 definida (comparación de JSON de configuración)
+- [ ] Fase 1 definida (comparación de JSON de configuración)
+- [ ] Fase 2 definida (comparación de imágenes)
 - [ ] Fase 3 definida (actualización del log)
 - [ ] Fase 4 definida (persistencia en base de datos)
 - [ ] Fase 5 definida (reporte ejecutivo)
+- [ ] Fase 6 definida (envío de correo con el reporte)
