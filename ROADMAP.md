@@ -175,25 +175,49 @@ flowchart TD
        `@version`/`@xmlns` de cada bloque — son metadatos de esquema, no configuración real; y
        `Discovery.UPnP/Zeroconf` por ser protocolo secundario)
 
-     **DAHUA y VIVOTEK — pendientes, sin verificar.** No hay ningún `.json` real de estas 2 marcas
-     todavía (ni en `Test/Check Plants` ni compartido de otra forma). Por las APIs documentadas de
-     cada fabricante hay indicios razonables de qué secciones existen (DAHUA: `Network`,
-     `VideoColor`, `Encode`; VIVOTEK: `network_*`, `image_c<N>_*`, `videoin_c<N>_*`), pero **no se
-     puede garantizar el nombre exacto de cada campo** (mayúsculas, índices, subclaves) sin un
-     dump real — inventar esos nombres arriesga que la comparación busque un campo que no existe
-     y falle en silencio.
+     **VIVOTEK** (verificado 22/09/2026 contra `Test/VIVOTEK-IP9181-192.168.81.80.json`, cámara
+     real `IP9181-LPC-v2`; dump plano `nivel1_nivel2=valor` reconstruido a dict anidado por
+     `txt_to_json`, un solo canal de video `c0`, hasta 3 streams `s0/s1/s2`):
+     - Imagen: `image.c0.{brightness,brightnesspercent,saturation,saturationpercent,contrast,
+       contrastpercent,sharpness,sharpnesspercent,gammacurve,hlm}`, `image.c0.defog.{mode,
+       strength}`, `image.c0.eis.{mode,strength}`, `image.c0.dnr.{mode,strength}`,
+       `image.c0.scene.mode`, `videoin.c0.{whitebalance,exposurelevel,irismode,maxgain,mingain,
+       color,flip,mirror,rotate,cmosfreq}`, `videoin.c0.wdrc.{mode,strength}`,
+       `videoin.c0.wdrpro.mode`, `videoin.c0.piris.{mode,position}`,
+       `videoin.c0.aespeed.{mode,speedlevel,sensitivity}`
+     - Video: `videoin.c0.sN.codectype`, `videoin.c0.sN.resolution`,
+       `videoin.c0.sN.{h264,h265}.{profile,maxframe,prioritypolicy}`,
+       `videoin.c0.sN.mjpeg.maxframe` (N = 0, 1, 2 — un stream por cada perfil de calidad)
+     - Compresión: `videoin.c0.sN.{h264,h265}.{ratecontrolmode,bitrate,quant,qvalue,qpercent,
+       intraperiod,maxvbrbitrate}`, `videoin.c0.sN.mjpeg.{ratecontrolmode,bitrate,quant,qvalue,
+       qpercent}`
+     - Network: `network.{ipaddress,subnet,router,dns1,dns2}`, `network.http.{port,alternateport,
+       authmode}`, `network.https.port`, `network.rtsp.{port,authmode}`, `network.pppoe.user`,
+       `network.ieee8021x.enable`, `network.qos.{cos.enable,dscp.enable}`
+     - Identificación (para detectar marca/modelo, no es una de las 4 categorías):
+       `system.info.{modelname,serialnumber,firmwareversion}`
+     - **Sin MAC disponible en este endpoint** — a diferencia de AXIS/HIKVISION, no encontré
+       ningún campo de dirección MAC en todo el dump (`getparam.cgi` no lo expone aquí).
+
+     **DAHUA — pendiente, sin verificar.** Sigue sin haber ningún `.json` real de esta marca. Por
+     la API documentada hay indicios razonables de qué secciones existen (`Network`, `VideoColor`,
+     `Encode`), pero **no se puede garantizar el nombre exacto de cada campo** (mayúsculas,
+     índices, subclaves) sin un dump real — inventar esos nombres arriesga que la comparación
+     busque un campo que no existe y falle en silencio.
    - Preguntas abiertas:
-     - **Pendiente de entrega**: correr `DahuaCamConf()` y `VivoCamConf()` (ya en
-       `Test/cameras/dahua.py` y `Test/cameras/vivotek.py`) contra una cámara real de cada marca y
-       compartir el resultado crudo (el dict, o el texto `key=value` antes de convertir), para
-       construir su lista de campos con la misma certeza que AXIS/HIKVISION.
+     - **Pendiente de entrega**: correr `DahuaCamConf()` (ya en `Test/cameras/dahua.py`) contra
+       una cámara Dahua real y compartir el resultado crudo (el dict, o el texto `key=value` antes
+       de convertir) — igual que ya se hizo con AXIS, HIKVISION y VIVOTEK.
      - AXIS puede tener hasta 8 "vistas" por cámara (`Image.I0` a `I7`, `ImageSource.I0` a `I7`);
        en los ejemplos revisados solo `I0` está habilitada. ¿Se compara solo la vista activa
        (`I0`), o las 8 aunque estén deshabilitadas? (aún sin responder)
-     - ¿Cómo se identifica la marca de una cámara a partir de su `.json`? Candidato con buena
-       confianza para AXIS/HIKVISION: AXIS trae `Brand.Brand == "AXIS"`, HIKVISION trae
-       `DeviceInfo["@xmlns"]` conteniendo `hikvision.com`. Falta el equivalente para DAHUA/VIVOTEK
-       una vez haya un dump real.
+     - ¿Cómo se identifica la marca de una cámara a partir de su `.json`? Candidatos con buena
+       confianza: AXIS trae `Brand.Brand == "AXIS"`, HIKVISION trae `DeviceInfo["@xmlns"]`
+       conteniendo `hikvision.com`, VIVOTEK trae `system.info.modelname`/`firmwareversion` con
+       texto reconocible (ej. `VVTK` en el firmware). Falta el equivalente para DAHUA. Alternativa
+       a considerar: como el orquestador ya sabe qué `[Marca]CamConf()` llamar por cámara (para
+       poder llamar la función correcta), ¿ese inventario de marca por cámara ya existe en algún
+       lado y se puede reutilizar directamente, en vez de re-detectar la marca leyendo el `.json`?
      - ¿Qué se considera un cambio "relevante" a reportar vs. ruido a ignorar (ej. tolerancias
        numéricas, o exact-match estricto en los campos de la lista de arriba)?
 
