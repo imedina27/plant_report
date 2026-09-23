@@ -84,20 +84,20 @@ Notas a tener en cuenta en cualquier código que lea o escriba estos `.log`:
 
 ```mermaid
 flowchart TD
-    A["Programa de revisión de cámaras (externo)<br/>ordena los .log y genera .jpg / .json / resumen_fecha.log"]
-    A --> B["Por cada cliente → planta → servidor → cámara"]
+    A["Programa de revision de camaras -externo-<br/>ordena los .log y genera .jpg, .json y resumen_fecha.log"]
+    A --> B["Por cada cliente, planta, servidor y camara"]
 
-    B --> C["Fase 1: Comparar [CAMARA].json actual<br/>contra config base<br/>(lógica según marca: AXIS / HIKVISION / DAHUA / VIVOTEK / ...)"]
-    B --> D["Fase 2: Comparar [CAMARA].jpg actual<br/>contra imagen base"]
+    B --> C["Fase 1: Comparar el .json de la camara<br/>contra su configuracion base<br/>-segun marca: AXIS, HIKVISION, DAHUA, VIVOTEK, etc-"]
+    B --> D["Fase 2: Comparar la imagen de la camara<br/>contra su imagen base"]
 
-    C --> E["Fase 3: Agregar resultado de ambas<br/>comparaciones al .log de esa cámara"]
+    C --> E["Fase 3: Agregar resultado de ambas<br/>comparaciones al log de esa camara"]
     D --> E
 
-    E --> F{"¿Ya se procesaron<br/>todas las cámaras del día?"}
-    F -- No --> B
-    F -- Sí --> G["Fase 4: Persistir resultados<br/>en PostgreSQL"]
+    E --> F{"Se procesaron todas<br/>las camaras del dia?"}
+    F -->|No| B
+    F -->|Si| G["Fase 4: Persistir resultados en PostgreSQL"]
 
-    G --> H["Fase 5: Generar reporte ejecutivo<br/>(PDF diario, por planta)"]
+    G --> H["Fase 5: Generar reporte ejecutivo<br/>PDF diario, por planta"]
     H --> I["Fase 6: Enviar por correo el PDF<br/>a los destinatarios designados"]
 ```
 
