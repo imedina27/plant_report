@@ -106,6 +106,15 @@ flowchart TD
 1. **Comparación de archivos JSON de configuración de las cámaras**
    Para cada cámara, comparar su `[CAMARA].json` (dump de configuración) actual contra una
    referencia base, para detectar cambios de configuración no autorizados/inesperados.
+   - **Implementado (23/09/2026)** para AXIS, HIKVISION y VIVOTEK, en `config_compare.py` +
+     `main.py`: detección de marca por contenido, extracción de campos curados por marca/categoría,
+     creación automática de la base si falta, y comparación exacta contra la base. Probado end to
+     end contra los 144 `.json` de `Test/Check Plants` (144 detectados correctamente, 0 sin
+     soportar), con `BASE CREADA` en la primera corrida y `OK` en la segunda (idempotente), y con
+     un cambio simulado (IP de una cámara) correctamente detectado como `CAMBIO` con el campo,
+     valor base y valor actual exactos. DAHUA queda pendiente de su dump real, sin bloquear a las
+     otras 3 (agregar una marca es una función `_dahua_fields()` + huella de detección más, no
+     tocar el core).
    - Decidido: los archivos se obtienen de la carpeta descrita arriba (`[CAMARA].json` por
      servidor/planta/día).
    - Decidido: la base de referencia **no existe todavía, hay que crearla** (ej. tomar el primer
@@ -312,7 +321,7 @@ flowchart TD
 
 ## Estado
 
-- [ ] Fase 1 definida (comparación de JSON de configuración)
+- [x] Fase 1 implementada para AXIS/HIKVISION/VIVOTEK (comparación de JSON de configuración) — falta DAHUA
 - [ ] Fase 2 definida (comparación de imágenes)
 - [ ] Fase 3 definida (actualización del log)
 - [ ] Fase 4 definida (persistencia en base de datos)
