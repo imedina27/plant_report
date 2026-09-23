@@ -121,6 +121,23 @@ flowchart TD
    - Decidido: el resultado se registra como un **campo nuevo** en el `.log` (ej.
      `Config Comparacion: OK/CAMBIO`), sin tocar la línea `Configuración: OK/Timed out` que ya
      existe (esa solo indica si se pudo *descargar* el JSON, no si coincide con la base).
+   - Decidido (23/09/2026): la base de referencia vive en una carpeta nueva, propia de este
+     proyecto, apuntada por una variable de entorno nueva (ej. `CONFIG_BASE_ROOT` en `.env`), con
+     la misma estructura que `Check Plants` pero **sin la carpeta de fecha** (es una referencia
+     viva, no un histórico diario): `[Cliente]\[Planta]\[Servidor]\[CAMARA].json`. La primera vez
+     que se procesa una cámara sin base, se copia su `.json` de ese día como base y el log registra
+     `Config Comparacion: BASE CREADA` (no "OK" ni "CAMBIO", porque no hubo comparación real).
+   - Decidido: si un campo de la lista curada no existe en el `.json` de una cámara puntual (puede
+     pasar según modelo/configuración), se ignora ese campo para esa cámara en vez de marcar error.
+   - Decidido: formato de la línea nueva en el log, siguiendo el estilo visual de las líneas ya
+     existentes: `[HH:MM:SS] INFO    <CAMARA>: Config Comparacion   OK/CAMBIO/BASE CREADA`.
+   - Decidido: la marca de cada cámara se detecta **leyendo el contenido de su `.json`** (huellas
+     de marca, ver más abajo), no desde un inventario externo — no existe uno reutilizable.
+   - Decidido: en AXIS, solo se comparan las vistas con `Enabled: "yes"` dentro de `Image.I0`-`I7` /
+     `ImageSource.I0`-`I7` (normalmente solo `I0`); las deshabilitadas se ignoran por ser puro
+     ruido (siempre en su valor de fábrica).
+   - Decidido: el criterio de "cambió" es **coincidencia exacta** de texto por campo (sin
+     tolerancias numéricas) — se ajustará después si genera demasiado ruido en la práctica.
    - **Importante — múltiples fabricantes, con crecimiento esperado**: el `.json` no tiene un
      esquema único, depende de la marca. La lógica de comparación debe diseñarse para que agregar
      una marca nueva sea configuración/extensión, no reescribir el core (mismo principio que se
@@ -207,19 +224,11 @@ flowchart TD
    - Preguntas abiertas:
      - **Pendiente de entrega**: correr `DahuaCamConf()` (ya en `Test/cameras/dahua.py`) contra
        una cámara Dahua real y compartir el resultado crudo (el dict, o el texto `key=value` antes
-       de convertir) — igual que ya se hizo con AXIS, HIKVISION y VIVOTEK.
-     - AXIS puede tener hasta 8 "vistas" por cámara (`Image.I0` a `I7`, `ImageSource.I0` a `I7`);
-       en los ejemplos revisados solo `I0` está habilitada. ¿Se compara solo la vista activa
-       (`I0`), o las 8 aunque estén deshabilitadas? (aún sin responder)
-     - ¿Cómo se identifica la marca de una cámara a partir de su `.json`? Candidatos con buena
-       confianza: AXIS trae `Brand.Brand == "AXIS"`, HIKVISION trae `DeviceInfo["@xmlns"]`
-       conteniendo `hikvision.com`, VIVOTEK trae `system.info.modelname`/`firmwareversion` con
-       texto reconocible (ej. `VVTK` en el firmware). Falta el equivalente para DAHUA. Alternativa
-       a considerar: como el orquestador ya sabe qué `[Marca]CamConf()` llamar por cámara (para
-       poder llamar la función correcta), ¿ese inventario de marca por cámara ya existe en algún
-       lado y se puede reutilizar directamente, en vez de re-detectar la marca leyendo el `.json`?
-     - ¿Qué se considera un cambio "relevante" a reportar vs. ruido a ignorar (ej. tolerancias
-       numéricas, o exact-match estricto en los campos de la lista de arriba)?
+       de convertir) — igual que ya se hizo con AXIS, HIKVISION y VIVOTEK. Falta también su huella
+       de detección de marca (AXIS: `Brand.Brand == "AXIS"`; HIKVISION: `DeviceInfo["@xmlns"]`
+       conteniendo `hikvision.com`; VIVOTEK: `system.info.firmwareversion` conteniendo `VVTK`).
+     - Falta diseñar el mecanismo concreto para "aceptar" un cambio legítimo como nueva base
+       cuando corresponda (mencionado arriba, aún sin resolver cómo se dispara).
 
 2. **Comparación de imágenes de cámara**
    Para cada cámara, obtener la imagen actual y compararla contra una imagen base de referencia
