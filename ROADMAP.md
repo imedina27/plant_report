@@ -108,36 +108,94 @@ flowchart TD
    referencia base, para detectar cambios de configuración no autorizados/inesperados.
    - Decidido: los archivos se obtienen de la carpeta descrita arriba (`[CAMARA].json` por
      servidor/planta/día).
-   - **Importante — múltiples fabricantes, con crecimiento esperado** (confirmado 22/09/2026
-     explorando `Test/Check Plants`): el `.json` **no tiene un esquema único**, depende de la
-     marca de la cámara. Hoy conviven al menos estas 4, incluso dentro de un mismo servidor:
-     - **AXIS** (VAPIX): raíz con claves como `Audio`, `Brand`, `ImageSource`, etc.
-     - **HIKVISION**: raíz `DeviceInfo` con namespace XML `hikvision.com` (el dump es XML
-       convertido a JSON).
-     - **DAHUA**
-     - **VIVOTEK**
-     - Se espera que aparezcan más marcas a futuro — la lógica de comparación debe diseñarse
-       para que agregar una marca nueva sea configuración/extensión, no reescribir el core (mismo
-       principio que se usó antes para las reglas de ordenamiento por cliente, aunque ese código
-       ya no exista en este repo).
-     - Falta inspeccionar ejemplos reales de DAHUA y VIVOTEK (por ahora solo se confirmó AXIS e
-       HIKVISION en los datos de prueba) para saber qué tan distintos son sus esquemas.
+   - Decidido: la base de referencia **no existe todavía, hay que crearla** (ej. tomar el primer
+     `.json` capturado de cada cámara como su base la primera vez que se procese). Una vez creada,
+     **queda fija hasta una actualización manual deliberada** — no se refresca sola cada día,
+     porque si lo hiciera nunca detectaríamos una desviación real. Falta diseñar el mecanismo para
+     "aceptar" un cambio legítimo como la nueva base cuando corresponda.
+   - Decidido: es lógica **nueva**, construida desde cero en este proyecto — no reutiliza el
+     sistema existente de comparación de imágenes (ese es solo para imagen).
+   - Decidido: no se compara el archivo completo. Se compara un **subconjunto curado de campos**,
+     agrupados en 4 categorías (Imagen, Video, Compresión, Network), definido **por marca** ya que
+     los nombres de campo no coinciden entre fabricantes.
+   - Decidido: el resultado se registra como un **campo nuevo** en el `.log` (ej.
+     `Config Comparacion: OK/CAMBIO`), sin tocar la línea `Configuración: OK/Timed out` que ya
+     existe (esa solo indica si se pudo *descargar* el JSON, no si coincide con la base).
+   - **Importante — múltiples fabricantes, con crecimiento esperado**: el `.json` no tiene un
+     esquema único, depende de la marca. La lógica de comparación debe diseñarse para que agregar
+     una marca nueva sea configuración/extensión, no reescribir el core (mismo principio que se
+     usó antes para las reglas de ordenamiento por cliente, aunque ese código ya no exista en este
+     repo).
+   - **Ya existe código de descarga de configuración por marca** (compartido 22/09/2026 en
+     `Test/cameras/{axis,hikvision,dahua,vivotek}.py`, funciones `[Marca]CamConf()`), que confirma
+     cómo llega el dump crudo de cada una antes de convertirlo a `.json`:
+
+     | Marca | Endpoint | Formato crudo | Separador de niveles |
+     | --- | --- | --- | --- |
+     | AXIS | `axis-cgi/param.cgi?action=list&group=root` | texto `root.Nivel1.Nivel2=valor` | `.` |
+     | HIKVISION | 7 llamadas ISAPI (`deviceInfo`, `Network/interfaces/1`, `Image/channels/1`, `Streaming/channels/101/`, `time`, `Security/users`, `capabilities`) | XML → dict | jerarquía XML |
+     | DAHUA | `configManager.cgi?action=getConfig&name=All` (+2 llamadas `getSystemInfo`) | texto `table.All.Nivel1.Nivel2=valor` | `.` |
+     | VIVOTEK | `getparam.cgi` (una sola llamada) | texto `nivel1_nivel2=valor` | `_` |
+
+     Nota menor: HIKVISION también descarga `Security/users` (aparece como `UserList` en el
+     `.json`), pero solo expone `userName`/`userLevel` (ej. `admin`/`Administrator`), sin
+     contraseñas — no forma parte de las 4 categorías a comparar de todos modos.
+   - **Lista de campos a comparar, verificada contra archivos reales de `Test/Check Plants`**
+     (AXIS: `CA.json`; HIKVISION: `A1p.json`) — rutas con notación de punto:
+
+     **AXIS**
+     - Imagen: `Image.I0.Appearance.{ColorEnabled,MirrorEnabled,Resolution,Rotation}`,
+       `ImageSource.I0.DayNight.*`, `ImageSource.I0.DCIris.*`, `ImageSource.I0.Focus.*`,
+       `ImageSource.I0.Sensor.*` (Brightness, Contrast, ColorLevel, Sharpness, WhiteBalance*,
+       Exposure*, WDR, Gain*, Shutter*, CustomExposureWindow*, etc.)
+     - Video: `Image.I0.Stream.{Duration,FPS,NbrOfFrames}`, `Image.I0.MPEG.*` (Complexity,
+       ConfigHeaderInterval, FrameSkipMode, ICount, PCount, UserData*, Z*),
+       `Image.I0.RateControl.{Mode,Priority}`
+     - Compresión: `Image.I0.Appearance.Compression`, `Image.I0.MPEG.H264.{Profile,PSEnabled}`,
+       `Image.I0.RateControl.{MaxBitrate,TargetBitrate}`, `Image.I0.SizeControl.MaxFrameSize`
+     - Network: `Network.{IPAddress,SubnetMask,DefaultRouter,Broadcast,BootProto,HostName,
+       DomainName,Media,DNSServer1,DNSServer2}`, `Network.eth0.{IPAddress,SubnetMask,MACAddress,
+       Broadcast}`, `Network.RTSP.{Port,Enabled}`, `Network.HTTP.AuthenticationPolicy`,
+       `Network.SSH.Enabled`, `Network.UPnP.Enabled` (a propósito, fuera de alcance por ahora:
+       `RTP.R0`-`R7` multicast, `QoS.*`, `IPv6.*`, `dot1x.*` — protocolo avanzado, poco propenso a
+       cambiar manualmente y genera mucho ruido)
+
+     **HIKVISION**
+     - Imagen: `ImageChannel.{ImageFlip.enabled, IrcutFilter.*, Exposure.*, powerLineFrequency.*,
+       Scene.mode, WDR.*, BLC.enabled, NoiseReduce.*, WhiteBalance.*, Sharpness.SharpnessLevel,
+       Gain.GainLevel, Shutter.ShutterLevel, Color.*, Dehaze.DehazeMode}`
+     - Video: `StreamingChannel.Video.{videoCodecType,videoScanType,videoResolutionWidth,
+       videoResolutionHeight,maxFrameRate,GovLength,H264Profile,H265Profile,SVC.enabled,
+       SmartCodec.enabled,snapShotImageType}`
+     - Compresión: `StreamingChannel.Video.{videoQualityControlType,constantBitRate,fixedQuality,
+       vbrUpperCap,vbrLowerCap,keyFrameInterval,smoothing}`
+     - Network: `NetworkInterface.IPAddress.{ipAddress,subnetMask,addressingType,
+       DefaultGateway.ipAddress,PrimaryDNS.ipAddress,SecondaryDNS.ipAddress}`,
+       `NetworkInterface.Link.{MACAddress,speed,duplex,MTU}` (fuera de alcance por ahora:
+       `@version`/`@xmlns` de cada bloque — son metadatos de esquema, no configuración real; y
+       `Discovery.UPnP/Zeroconf` por ser protocolo secundario)
+
+     **DAHUA y VIVOTEK — pendientes, sin verificar.** No hay ningún `.json` real de estas 2 marcas
+     todavía (ni en `Test/Check Plants` ni compartido de otra forma). Por las APIs documentadas de
+     cada fabricante hay indicios razonables de qué secciones existen (DAHUA: `Network`,
+     `VideoColor`, `Encode`; VIVOTEK: `network_*`, `image_c<N>_*`, `videoin_c<N>_*`), pero **no se
+     puede garantizar el nombre exacto de cada campo** (mayúsculas, índices, subclaves) sin un
+     dump real — inventar esos nombres arriesga que la comparación busque un campo que no existe
+     y falle en silencio.
    - Preguntas abiertas:
-     - El JSON tiene cientos de campos (incluye contadores, timestamps, IDs de sesión, etc. que
-       cambian solos sin indicar un problema real) — ¿se compara el archivo completo o solo un
-       subconjunto de campos relevantes (ej. red, resolución, marca/modelo, rotación)? Esto
-       probablemente deba definirse **por marca**, ya que los campos relevantes no se van a
-       llamar igual entre fabricantes.
-     - ¿Cómo se identifica la marca de una cámara a partir de su `.json` (una clave raíz distinta
-       por marca, un campo `Brand`/`deviceName` a nivel superior, o hay que mantener una lista de
-       heurísticas por fabricante)?
-     - ¿Dónde vive o cómo se define el JSON "base" de referencia? (mismo problema que con la
-       imagen base de la Fase 2 — no se encontró ninguna carpeta de referencia en el disco)
-     - ¿Esto lo hace el mismo sistema existente de comparación de imágenes, o es lógica nueva?
-     - El `.log` ya tiene una línea `Configuración: OK/Timed out` que solo indica si se pudo
-       *descargar* el JSON, no si su contenido cambió respecto a la base — ¿el resultado de esta
-       comparación se registra como un campo nuevo, o se reutiliza/reemplaza ese existente?
-     - ¿Qué se considera un cambio "relevante" a reportar vs. ruido a ignorar?
+     - **Pendiente de entrega**: correr `DahuaCamConf()` y `VivoCamConf()` (ya en
+       `Test/cameras/dahua.py` y `Test/cameras/vivotek.py`) contra una cámara real de cada marca y
+       compartir el resultado crudo (el dict, o el texto `key=value` antes de convertir), para
+       construir su lista de campos con la misma certeza que AXIS/HIKVISION.
+     - AXIS puede tener hasta 8 "vistas" por cámara (`Image.I0` a `I7`, `ImageSource.I0` a `I7`);
+       en los ejemplos revisados solo `I0` está habilitada. ¿Se compara solo la vista activa
+       (`I0`), o las 8 aunque estén deshabilitadas? (aún sin responder)
+     - ¿Cómo se identifica la marca de una cámara a partir de su `.json`? Candidato con buena
+       confianza para AXIS/HIKVISION: AXIS trae `Brand.Brand == "AXIS"`, HIKVISION trae
+       `DeviceInfo["@xmlns"]` conteniendo `hikvision.com`. Falta el equivalente para DAHUA/VIVOTEK
+       una vez haya un dump real.
+     - ¿Qué se considera un cambio "relevante" a reportar vs. ruido a ignorar (ej. tolerancias
+       numéricas, o exact-match estricto en los campos de la lista de arriba)?
 
 2. **Comparación de imágenes de cámara**
    Para cada cámara, obtener la imagen actual y compararla contra una imagen base de referencia
