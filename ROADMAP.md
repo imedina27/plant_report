@@ -236,32 +236,291 @@ flowchart TD
        de convertir) — igual que ya se hizo con AXIS, HIKVISION y VIVOTEK. Falta también su huella
        de detección de marca (AXIS: `Brand.Brand == "AXIS"`; HIKVISION: `DeviceInfo["@xmlns"]`
        conteniendo `hikvision.com`; VIVOTEK: `system.info.firmwareversion` conteniendo `VVTK`).
-     - Falta diseñar el mecanismo concreto para "aceptar" un cambio legítimo como nueva base
-       cuando corresponda (mencionado arriba, aún sin resolver cómo se dispara).
+     - ~~Falta diseñar el mecanismo para "aceptar" un cambio legítimo como nueva base~~ —
+       **resuelto (30/09/2026)**: se hace con la ventana de revisión descrita en la sección 2.3, que
+       aplica igual a Fase 1 (mostrando una tabla de campo / valor base / valor actual en vez de dos
+       imágenes) y a Fase 2.
 
 2. **Comparación de imágenes de cámara**
    Para cada cámara, obtener la imagen actual y compararla contra una imagen base de referencia
    para detectar si la cámara se movió.
    - Decidido: las imágenes se obtienen de la carpeta descrita arriba (`[CAMARA].jpg` por
      servidor/planta/día).
-   - Decidido: ya existe un sistema Python que hace esta comparación. Pendiente que el usuario
-     comparta el código para revisarlo, mejorarlo e integrarlo a este proyecto (en vez de
-     construir la lógica de comparación desde cero).
    - Decidido: `[CAMARA]_ai.jpg` es la salida de un sistema de IA ya existente (a reutilizar,
-     no a reconstruir). Falta confirmar con el script existente qué hace exactamente y si se
-     relaciona con la comparación contra la imagen base.
+     no a reconstruir). Falta confirmar qué hace exactamente y si se relaciona con la comparación
+     contra la imagen base.
+   - La base de imágenes de referencia vive en
+     `Test/Image Base/[Cliente]/[Planta]/[Servidor]/[CAMARA].jpg` (misma estructura que la base de
+     configuración, sin carpeta de fecha).
+   - Curación manual inicial (23/09/2026): se tomó del histórico la imagen más reciente de cada
+     cámara sin vehículos, sin personas y tomada entre 8:00 y 9:00 AM. Resultado: **91 imágenes**.
+     Las que quedaron fuera son sistemáticamente las de mayor tráfico (andenes de carga, garitas,
+     básculas), ocupadas en todos los días revisados.
+   - **Inventario real al 25/09/2026** (contado contra `Test/Check Plants`):
+
+     | Planta | Cámaras | Base curada | Sin base |
+     | --- | --- | --- | --- |
+     | APAN | 9 | 7 | 2 |
+     | ATLANTICO | 11 | 9 | 2 |
+     | GUADALAJARA | 1 | 1 | — |
+     | MEDELLIN | 11 | 4 | 7 |
+     | MEXICO | 0 | — | sin imágenes |
+     | TOCANCIPA | 12 | 7 | 5 |
+     | TUXTEPEC | 18 | 16 | 2 |
+     | VALLE | 0 | — | sin imágenes |
+     | ZACATECAS | 81 | 47 | 34 |
+     | **Total** | **143** | **91** | **52** |
+
+   - **El inventario NO es estático**: ZACATECAS pasó de 67 cámaras (17/09) a 81 (25/09) — 14
+     cámaras nuevas en 8 días. Curar la base no es una tarea de una sola vez; el sistema tiene que
+     detectar cámaras nuevas sin base y resolverlas solo (igual que Fase 1 con `BASE CREADA`).
+   - MEXICO y VALLE (`QLYMSPROD09`) no tienen ninguna imagen en el histórico, solo `.log`.
+
+   ### 2.1 Análisis del método (23/09/2026)
+
+   El usuario compartió el script existente en `Test/Rev_Local/prueba-diferencia.py`. Lo que hace:
+   detecta objetos con YOLO11s → tapa de negro las cajas detectadas en **ambas** imágenes (la unión,
+   para que un camión presente en solo una no genere diferencia) → aplica desenfoque gaussiano →
+   calcula diferencia absoluta píxel a píxel → reporta media, desviación y percentiles.
+
+   Se corrieron dos experimentos para decidir el enfoque con evidencia, no por intuición
+   (`Test/Rev_Local/compare_methods.py` y `simulate_shift.py`):
+
+   **Experimento 1 — 15 pares reales ya inspeccionados manualmente**, de 3 tipos: misma cámara
+   limpia, misma cámara ocupada por camión/montacargas/persona, y cámaras distintas.
+
+   | Tipo de par | Método 1 (diff de píxeles) | Método 2 (features + homografía) |
+   | --- | --- | --- |
+   | Misma cámara, iluminación muy distinta | mean=21.7, p99=119 | **0.2 px** |
+   | Misma cámara, ocupada (9 casos) | mean entre 6.2 y 25.8 | **0.0 a 0.4 px** |
+   | Cámaras distintas (4 casos) | N/A (resolución distinta) | **100 a 441 px** |
+
+   Conclusiones:
+   - **El diff de píxeles NO sirve como detector de movimiento.** El par "misma cámara, solo cambió
+     la luz" (mean=21.7) cae justo en medio del rango de los pares "misma cámara con camión encima"
+     (6.2–25.8). No existe umbral que los separe. Ésta es la fuente directa del riesgo de falsos
+     positivos que preocupaba.
+   - **El emparejamiento de características separa limpiamente**: 0–1 px vs 100–441 px. Una brecha
+     de más de 250x, sin zona gris.
+   - **YOLO11s falla bastante en estas imágenes** — etiquetó camiones reales como `refrigerator`,
+     `snowboard`, `suitcase`, `airplane`, `boat`, `train` (vistas cenitales/fisheye muy distintas a
+     COCO), y en 2 de 9 casos ocupados no detectó nada (montacargas+persona en `P2t2`, camión en
+     `A1t2`). **Aun así, el Método 2 clasificó bien los 15 pares**, porque RANSAC descarta solo los
+     puntos que no encajan. Es decir: el método geométrico es robusto también a que la detección de
+     objetos falle. Por eso **no se invierte por ahora en un modelo más grande ni en YOLO-World**.
+
+   **Experimento 2 — corrimiento simulado** (transformaciones geométricas conocidas):
+   - La métrica es **lineal y fiel**: traslación de 1→1.10 px, 10→10.03 px, 100→99.98 px. Mide
+     exactamente lo que se cree que mide.
+   - Equivalencias en una imagen de 2688 px de ancho: rotación 0.5°≈3.3 px, 1°≈6.5 px, 2°≈13 px,
+     5°≈32 px. Zoom +1%≈3.9 px, +5%≈18.7 px.
+   - **Piso de ruido real (cuadro completo): 0.2–1.0 px** en los pares de misma cámara, incluso con
+     cambios fuertes de iluminación.
+   - **Hallazgo crítico**: al recortar el cuadro para la prueba, el par `ZAC_A1p` colapsó de 378
+     coincidencias a 4. La causa es que la estructura útil (racks, tarimas) está en los bordes y el
+     centro es piso liso. Degradación medida al ir recortando: 100%→378 matches/0.25 px,
+     88%→223/0.28 px, 80%→**31 matches/12.03 px**, 70%→no concluyente.
+     Lo importante: con solo 26 inliers el método reportó **12.03 px de desplazamiento, que es
+     falso**. Un número con pocas coincidencias parece confiable y no lo es.
+     → **El conteo de inliers debe ser parte de la decisión, no solo el desplazamiento.**
+   - **Prueba de obstrucción** (cámara quieta, lente tapado progresivamente):
+
+     | Tapado | Método 2 (geometría) | Método 1 (contenido) |
+     | --- | --- | --- |
+     | 25% | 0.00 px, 1950 inliers | mean=12.4 |
+     | 50% | 0.00 px, 1021 inliers | mean=47.0 |
+     | 80% | 0.09 px, **11 inliers** | mean=102.3 |
+     | 95% | no concluyente | mean=113.7 |
+
+     Esto valida el diseño de dos métodos: hasta 80% tapada, el Método 2 dice correctamente "no se
+     movió" (¡y es cierto!), pero sería engañoso por sí solo porque la cámara está prácticamente
+     ciega. El Método 1 sí lo detecta, subiendo de 12.4 a 102.3.
+
+   **Experimento 3 — ¿sirve una imagen ocupada como base?** (30/09/2026,
+   `Test/Rev_Local/test_base_ocupada.py`). La curación manual se hizo bajo el supuesto de usar diff
+   de píxeles, donde un camión en la base envenenaría todas las comparaciones. Con el método
+   geométrico esa premisa puede no aplicar. Se probaron 16 pares de cámaras que quedaron pendientes
+   justamente por estar siempre ocupadas, usando un día con camión como base contra otro día con un
+   camión **distinto en otra posición**:
+
+   | Cámara | Inliers | Desplazamiento |
+   | --- | --- | --- |
+   | ZAC E1p (3 pares) | 428–607 | 0.09–0.12 px |
+   | ZAC E1t1 (2 pares) | 168–810 | 0.07–0.18 px |
+   | ZAC P1p (2 pares) | 186–383 | 0.11–0.14 px |
+   | ZAC E2p (camión vs montacargas) | 209–459 | 0.15–0.25 px |
+   | ZAC R2t2, MED B02-C, MED B03 | 122–515 | 0.19–0.32 px |
+   | **ZAC C2p** (2 pares) | **8 y 16** | **561 y 649 px** |
+   | **TOC B02** (2 pares) | **61 y 87** | **136 y 179 px** |
+
+   - **12 de 16 funcionan perfecto.** Una base con camión sirve igual, incluso comparando contra un
+     camión distinto en otra posición. RANSAC descarta la zona ocupada.
+   - **Los 4 que fallan** son las cámaras donde el camión ocupa *todo* el cuadro (`C2p` es un primer
+     plano de una parrilla; `B02` de TOCANCIPA es un camión que llena la imagen). No queda fondo
+     estático al cual anclarse.
+   - **El conteo de inliers los separa limpiamente**: casos buenos 122–810, casos malos 8–87. Con un
+     mínimo de **~100 inliers** se rechazan los 4 malos y se conservan los 12 buenos, sin excepción.
+     La *proporción* de inliers NO sirve para esto (buenos bajan a 0.53, malos suben a 0.58 — se
+     traslapan); es el conteo absoluto el que discrimina.
+   - **Consecuencia**: la base puede crearse automáticamente para casi todas las 52 cámaras sin
+     base, igual que en Fase 1. Las cámaras imposibles se auto-identifican reportando "no
+     concluyente" de forma consistente — que es la respuesta honesta ("no puedo verificar esta
+     cámara"), no un falso positivo. No hay que curar esa lista a mano.
+   - La curación manual sigue siendo valiosa (una base limpia da más inliers = más margen), pero
+     pasa de **requisito** a **optimización**.
+
+   ### 2.2 Diseño decidido
+
+   **No son dos métodos votando sobre la misma pregunta — cada uno responde una pregunta distinta:**
+
+   - **Método 2 (features + homografía)**: ¿está apuntando al mismo lugar? → señal **principal**.
+   - **Método 1 (diff de píxeles)**: ¿está viendo lo mismo? → señal **secundaria**, con umbral
+     flojo a propósito (bien por encima del 21.7 que produce un cambio de luz), solo para fallas
+     evidentes.
+   - **Conteo de inliers**: señal de confianza. Pocos inliers ⇒ no concluyente, sin importar qué
+     diga el desplazamiento.
+
+   | Geometría (M2) | Contenido (M1) | Diagnóstico |
+   | --- | --- | --- |
+   | alineada | similar | OK |
+   | alineada | muy distinto | En su lugar pero obstruida/alterada → revisar |
+   | no alineada | — | **Cámara movida** → alertar |
+   | inliers insuficientes | — | No se puede comparar (tapada/oscura) → revisar |
+
+   Otras decisiones:
+   - **Usar el cuadro completo**, nunca recortado.
+   - **Umbral normalizado como % del ancho**, no en píxeles absolutos: las cámaras van de 1280 a
+     3840 px de ancho y 10 px no significan lo mismo en una que en otra.
+   - Umbral inicial propuesto: **0.25–0.5% del ancho** (≈7–13 px en una cámara de 2688). Deja un
+     margen de 6x sobre el piso de ruido medido (≈1 px) y detecta rotaciones desde ~1°. A confirmar
+     con la prueba de cámara física.
+   - **Mínimo de inliers: ~100** (validado en el Experimento 3). Por debajo de eso el resultado es
+     "no concluyente" sin importar qué diga el desplazamiento.
+   - Decidido (30/09/2026) — **sensibilidad: sensible + confirmación de 2–3 días**. Se detecta
+     desde ~1° de giro, pero solo se alerta si la diferencia persiste varios días seguidos. Combina
+     sensibilidad alta con casi cero falsos positivos, a costa de 1–2 días de retraso en el aviso.
+     Un día raro de iluminación no se repite; una cámara movida sí.
+   - Decidido (30/09/2026) — **la base de imagen se crea sola** (`BASE CREADA`) para las cámaras que
+     no la tengan, igual que en Fase 1. Ya no es requisito curarla a mano (ver Experimento 3).
+
+   ### 2.3 Ventana de revisión (decidido 30/09/2026)
+
+   Cuando una cámara sale dudosa, el sistema **abre una ventana durante la ejecución** con la imagen
+   base a la izquierda y la imagen actual a la derecha, y tres botones abajo:
+
+   | Botón | Significado | Efecto |
+   | --- | --- | --- |
+   | **Bien** | El algoritmo se equivocó, la cámara no se movió | Falso positivo. Se registra y no se vuelve a preguntar lo mismo. |
+   | **Mal** | Sí se movió, hay que ir a acomodarla físicamente | Queda como incidencia abierta y sigue alertando hasta resolverse. |
+   | **Sustituir Base** | Se movió, pero se decide dejarla así | La imagen actual reemplaza a la base. |
+
+   - **Por qué durante la ejecución y no en una cola aparte**: una cola que nadie revisa es peor que
+     una pausa que obliga a decidir. Así el proceso termina completo, sin nada pendiente.
+   - **Distinguir "Bien" de "Sustituir Base" importa**: ambos detienen la alerta, pero por razones
+     distintas. Guardar esa diferencia da gratis la **tasa real de falsos positivos** medida en
+     producción — la única forma de saber si el umbral quedó bien calibrado.
+   - **Solo interrumpen las cámaras dudosas.** Las que pasan limpio nunca abren ventana. Con la
+     regla de confirmar 2–3 días, deberían ser pocas. Llevar un contador ("3 de 7").
+   - **Bandera `--sin-interaccion`** para la corrida automatizada (Fases 5 y 6 necesitan que el
+     proceso termine solo para generar y enviar el reporte diario). En ese modo las dudosas quedan
+     marcadas como "pendiente de revisión" y se vuelven a preguntar en la siguiente corrida manual.
+   - La misma ventana sirve para **Fase 1**: en vez de dos imágenes, una tabla de campo / valor base
+     / valor actual, con los mismos tres botones. Resuelve el mecanismo de "aceptar cambio como
+     nueva base" que estaba pendiente en ambas fases.
+
+   ### 2.4 Batería de pruebas con cámara física (pendiente de ejecutar)
+
+   Las cámaras de producción no se pueden mover. El experimento sintético tiene un límite honesto:
+   deformar una imagen en 2D y luego medirla con un método que **estima transformaciones 2D** es en
+   buena parte una tautología. No reproduce paralaje, contenido nuevo entrando al cuadro, cambio de
+   reflejos especulares, reajuste de auto-exposición, ni la interacción del giro con la distorsión
+   del lente. Por eso se montará una cámara en trípode para validar con movimiento real.
+
+   **Equipo (confirmado 30/09/2026): una cámara HIKVISION**, que es una de las marcas de producción
+   — así que la óptica, la resolución y la compresión son representativas y los números salen
+   directamente comparables. Se necesita además un trípode, preferentemente **con escala de grados
+   en el cabezal** para poder medir el movimiento aplicado.
+
+   **Captura: no se necesita tarjeta SD.** Script listo en `Test/Camara_Fisica/capturar.py`. Usa el
+   mismo endpoint ISAPI y la misma autenticación digest que producción
+   (`/ISAPI/Streaming/channels/1/picture`), que es lo que determina resolución y compresión del
+   JPEG. Guarda en `Test/Camara_Fisica/[escenario]/[timestamp].jpg` más un `capturas.csv` con la
+   verdad conocida de cada toma.
+
+   Se configura con un `.env` en esa carpeta (`CAM_TEST_IP`, `CAM_TEST_USER`, `CAM_TEST_PASS`) y
+   tiene tres modos:
+
+   ```powershell
+   python capturar.py --probar                              # verifica conexión y encuadre
+   python capturar.py --escenario A_base --intervalo 20     # desatendido, cada 20 min
+   python capturar.py --escenario A_movimientos             # interactivo, pide nota por captura
+   ```
+
+   **Tiempo estimado**: ~2h15 de trabajo real, repartido en dos ratos con un día de por medio en el
+   que el script corre solo.
+
+   | Prueba | Tiempo del usuario | Transcurrido |
+   | --- | --- | --- |
+   | Montar, apuntar y arrancar | 15 min | — |
+   | 1. Línea base sin movimiento | 0 min (corre sola) | 1 día |
+   | 2–6. Movimientos, golpe y regreso, obstrucción, objeto, zoom | ~2 h seguidas | 2 h |
+
+   Versión reducida si hay poco tiempo: línea base de 6 horas (mañana a tarde, que ya captura el
+   mayor cambio de luz) y pruebas 2–6 recortadas a 1°, 2° y 5° — queda en ~1 hora total, a costa de
+   precisión en el piso de ruido, que es justo el número más importante.
+
+   **Dónde ponerla y a dónde apuntarla** — se necesitan **dos escenarios**, porque el Experimento 2
+   mostró que la robustez depende de cuánta estructura hay en el cuadro:
+   - **Escenario A (fácil, con estructura)**: apuntar a una zona con bordes y objetos a distintas
+     distancias — muebles, marcos de puerta, estantes, un pasillo. Equivale a las cámaras tipo
+     `MED_EP1` / `ZAC_A1p` a cuadro completo. Los objetos a distintas profundidades son los que
+     generan el **paralaje** que la simulación no puede reproducir.
+   - **Escenario B (difícil, casi sin textura)**: apuntar a una superficie lisa y uniforme — una
+     pared blanca, el piso, la puerta del garaje. Equivale a `TUX_E3`. Aquí es donde esperamos que
+     el método sea frágil y necesitamos saber **cuánto**.
+   - En ambos, que le dé **luz natural cambiante** (cerca de una ventana), para que la línea base
+     capture variación real de iluminación a lo largo del día.
+
+   **Batería de pruebas, en orden:**
+
+   1. **Línea base sin movimiento (lo más valioso, ~1 día)**
+      Cámara fija, captura cada 15–30 min durante un día completo: mañana, mediodía, tarde, noche
+      con luz artificial. Nada se mueve.
+      → Da el **piso de ruido real** bajo variación de iluminación completa. Hoy ese número se
+      estima con apenas un puñado de pares de una ventana de 10 días de septiembre, y ya se vio que
+      varía entre 0.2 y 1.0 px según la cámara. Es el número que define el umbral.
+   2. **Movimientos medidos (~1 hora)**
+      Con la escala del cabezal: 0.5°, 1°, 2°, 5° y 10°. Capturar antes y después de cada uno.
+      → Permite contrastar el movimiento real contra la equivalencia calculada en la simulación
+      (1°≈6.5 px en 2688 de ancho) y ver cuánto la desvía el paralaje.
+   3. **Golpe y regreso (~15 min)**
+      Mover la cámara y volverla a su lugar "a ojo", como quien la golpeó sin querer y la reacomodó.
+      Repetir 3–4 veces.
+      → Es el escenario realista de producción. Mide el error residual que queda y si cae por
+      encima o por debajo del umbral.
+   4. **Obstrucción (~15 min)**
+      Tapar el lente parcialmente (25%, 50%, 80%) y casi por completo, con objetos reales (una
+      caja, una bolsa, cinta sobre el domo).
+      → Valida con óptica real (desenfoque, reflejos) lo que se simuló con un rectángulo negro, y
+      confirma que responde "no puedo comparar" en vez de pasar como OK.
+   5. **Objeto sin mover la cámara (~15 min)**
+      Que alguien se pare enfrente, o poner una caja grande, sin tocar el trípode.
+      → El equivalente al camión estacionado, pero con certeza absoluta de que la cámara no se
+      movió. Confirma que no genera falso positivo.
+   6. **Zoom, si la cámara es varifocal (~10 min)**
+      Cambiar el zoom ligeramente sin mover el cuerpo de la cámara.
+
+   **Salida esperada**: un conjunto de pares con verdad conocida que permita (a) fijar el umbral
+   con datos reales en vez de estimados, y (b) verificar el mínimo de inliers por debajo del cual
+   no hay que confiar en el número.
+
    - Preguntas abiertas:
-     - ¿Dónde está el script/proyecto existente? (ruta local, repo, etc.) — el usuario lo
-       compartirá cuando lleguemos a esta fase.
-     - No se encontró ninguna carpeta de "imagen base"/referencia en el disco explorado — ¿dónde
-       vive o cómo se define? (¿la maneja el script existente, es la primera imagen capturada de
-       cada cámara, o se cura manualmente?)
-     - ¿Cuántas cámaras totales se manejan? (ejemplo visto: ~11-12 cámaras por servidor, 11
-       servidores activos ese día)
-     - ¿El sistema existente ya define un umbral/método de sensibilidad, o también está pendiente
-       de ajustar?
+     - **Pendiente de entrega**: IP y credenciales de la cámara HIKVISION de prueba (para el `.env`
+       de `Test/Camara_Fisica/`), y si es varifocal (define si se hace la prueba 6 de zoom).
      - Cuando ya haya varios días acumulados, ¿el programa debe procesar solo el día más reciente,
        un rango de fechas, o todos los pendientes de procesar?
+     - ¿Qué reporta una cámara que ese día falló en el log (`Timed out`, sin `.jpg`)? Propuesta:
+       registrarlo explícito como `SIN IMAGEN` en vez de omitirla en silencio.
 
 3. **Actualización del log**
    Completar el log original con los resultados de la comparación (por cámara).
@@ -322,7 +581,15 @@ flowchart TD
 ## Estado
 
 - [x] Fase 1 implementada para AXIS/HIKVISION/VIVOTEK (comparación de JSON de configuración) — falta DAHUA
-- [ ] Fase 2 definida (comparación de imágenes)
+- [x] Fase 2: base de imágenes curada (91 de 143 cámaras; el resto se creará sola)
+- [x] Fase 2: método decidido con evidencia (features+homografía como señal principal, diff de
+      píxeles como secundaria, inliers como confianza)
+- [x] Fase 2: ventana de revisión diseñada (3 botones, bloqueante, con `--sin-interaccion`) —
+      resuelve también el "aceptar nueva base" de Fase 1
+- [x] Fase 2: script de captura para la cámara física listo (`Test/Camara_Fisica/capturar.py`)
+- [ ] Fase 2: ejecutar la batería de pruebas con la cámara HIKVISION (falta IP y credenciales)
+- [ ] Fase 2: umbral final calibrado e implementación del módulo
+- [ ] Ventana de revisión implementada
 - [ ] Fase 3 definida (actualización del log)
 - [ ] Fase 4 definida (persistencia en base de datos)
 - [ ] Fase 5 definida (reporte ejecutivo)
