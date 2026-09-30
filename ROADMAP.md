@@ -369,7 +369,58 @@ flowchart TD
    - La curación manual sigue siendo valiosa (una base limpia da más inliers = más margen), pero
      pasa de **requisito** a **optimización**.
 
-   ### 2.2 Diseño decidido
+   **Experimento 4 — el texto sobreimpreso secuestra la medición** (30/09/2026, primera prueba con
+   la cámara física; `Test/Rev_Local/verifica_overlay.py`, `cuenta_features.py`, `prueba_rescate.py`).
+
+   **Este hallazgo invalida los números de los Experimentos 1 y 3.** Al mover físicamente la cámara
+   y regresarla a ojo, el método reportó que NO se había movido:
+
+   | Acción (la cámara sí se movió) | Con el texto | Con el texto tapado |
+   | --- | --- | --- |
+   | Golpe y regreso 1 | 0.10 px | **82.89 px** |
+   | Golpe y regreso 2 | 0.11 px | **87.59 px** |
+   | Golpe y regreso 3 | 0.12 px | **64.32 px** |
+
+   - **Mecanismo**: la fecha/hora y el nombre de la cámara están quemados en coordenadas fijas del
+     sensor y no se mueven aunque la cámara gire. Cuando el movimiento es grande, la escena real
+     deja de coincidir pero el texto coincide perfecto, y RANSAC se queda con el texto como el
+     conjunto consistente mayoritario. Resultado: **falso negativo**, el peor error posible aquí.
+   - **No es un caso raro.** Porcentaje de keypoints ORB que caen sobre el texto (que ocupa el 8%
+     del área): ZAC_A2p 97.9%, ZAC_P1t2 87.8%, MED_EP1 84.9%, ZAC_A1p 83.0%, ZAC_R2p 81.5%,
+     TOC_EP1 75.1%, ZAC_A2t1 68.1%, TUX_E3 34.2%. Letras blancas sobre concreto gris producen
+     esquinas mucho más marcadas que la textura del concreto.
+   - **Qué invalida**: la separación "limpia" del Experimento 1 (0–1 px vs 100–441 px) era en buena
+     parte un artefacto. Los pares de misma cámara daban ~0 px porque el texto estaba fijo, no
+     porque la escena coincidiera; los de cámaras distintas daban cientos de px porque tenían
+     resoluciones distintas y el texto no alineaba. Se estaba midiendo *"¿tienen el mismo texto en
+     el mismo lugar?"*, no *"¿es la misma vista?"*. Las conclusiones coincidieron con la realidad
+     por casualidad, porque ninguna de esas cámaras se había movido.
+   - **Por qué la prueba sintética no pudo encontrarlo**: al deformar una imagen, el texto se
+     deforma junto con la escena, así que nunca entran en conflicto. Hacía falta movimiento físico
+     real para que aparecieran las dos versiones en desacuerdo. Ésta es la justificación concreta de
+     por qué valió la pena montar la cámara.
+   - **Corrección parcial**: tapar el texto arregla el falso negativo (0.10 px → 82.88 px con
+     consistencia 0.98). Pero no basta con taparlo — hay que subir también el presupuesto de puntos,
+     porque el texto se estaba llevando casi todo. Probado en 5 cámaras de producción con el texto
+     tapado y `nfeatures=4000`: ZAC_A1p, ZAC_A2t1 y TUX_E3 recuperan bien; **ZAC_A2p y ZAC_P1t2 no**
+     — encuentran 4000 puntos pero ninguno coincide, porque están sobre grano y ruido del concreto
+     que no se repite entre capturas.
+   - **Enmascarado: bandas completas NO sirven.** Tapar bandas superior e inferior de ancho completo
+     (10%) corrige el secuestro pero destruye el emparejamiento en cámaras cuya estructura vive
+     cerca de los bordes (ZAC_A2p pasó de 405 inliers a 2 matches). Tapar solo las dos esquinas
+     (arriba-izquierda y abajo-derecha, que es donde va el texto en todas las imágenes revisadas —
+     formato por defecto de HIKVISION y AXIS) conserva más cuadro, pero sigue siendo insuficiente
+     para las cámaras sin textura.
+   - **Pendiente**: para las cámaras de poca textura, ORB no es el detector adecuado. Hay que probar
+     un método basado en intensidad (correlación de fase o alineación ECC) que no dependa de
+     esquinas.
+
+   ### 2.2 Diseño decidido (en revisión tras el Experimento 4)
+
+   > Los umbrales y tablas de esta sección se calcularon **sin enmascarar el texto sobreimpreso**
+   > (Experimentos 1–3). El Experimento 4 muestra que eso invalida los números concretos, aunque el
+   > diseño de "dos señales + guarda de inliers" sigue siendo correcto. Repetir con el texto
+   > enmascarado antes de fijar el umbral final.
 
    **No son dos métodos votando sobre la misma pregunta — cada uno responde una pregunta distinta:**
 
@@ -582,12 +633,20 @@ flowchart TD
 
 - [x] Fase 1 implementada para AXIS/HIKVISION/VIVOTEK (comparación de JSON de configuración) — falta DAHUA
 - [x] Fase 2: base de imágenes curada (91 de 143 cámaras; el resto se creará sola)
-- [x] Fase 2: método decidido con evidencia (features+homografía como señal principal, diff de
-      píxeles como secundaria, inliers como confianza)
+- [x] Fase 2: diseño de dos señales + guarda de inliers validado en principio (features+homografía
+      como señal principal, diff de píxeles como secundaria) — **umbrales a recalcular** (ver abajo)
 - [x] Fase 2: ventana de revisión diseñada (3 botones, bloqueante, con `--sin-interaccion`) —
       resuelve también el "aceptar nueva base" de Fase 1
-- [x] Fase 2: script de captura para la cámara física listo (`Test/Camara_Fisica/capturar.py`)
-- [ ] Fase 2: ejecutar la batería de pruebas con la cámara HIKVISION (falta IP y credenciales)
+- [x] Fase 2: script de captura para la cámara física listo y probado contra la HIKVISION real
+      (`Test/Camara_Fisica/capturar.py`)
+- [x] Fase 2: **Experimento 4 (30/09/2026)** — el texto sobreimpreso secuestra la homografía y
+      produce falsos negativos (cámara movida 65-88 px, reportado como 0.1 px). Invalida los
+      umbrales de los Experimentos 1-3. Enmascarar solo las esquinas ayuda pero no alcanza en
+      cámaras sin textura (ORB no encuentra estructura repetible en concreto liso).
+- [ ] Fase 2: probar correlación de fase / ECC para cámaras sin textura suficiente
+- [ ] Fase 2: rehacer Experimentos 1-3 con el texto enmascarado
+- [ ] Fase 2: terminar la batería de pruebas con la HIKVISION (línea base corriendo desde 30/09,
+      faltan movimientos medidos, obstrucción, objeto sin mover, zoom)
 - [ ] Fase 2: umbral final calibrado e implementación del módulo
 - [ ] Ventana de revisión implementada
 - [ ] Fase 3 definida (actualización del log)
