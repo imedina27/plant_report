@@ -31,14 +31,31 @@ D:\Imágenes\Quantum Labs\Check Plants\
 ```
 
 Con datos de ejemplo (18/09/2026): 2 clientes, 10 plantas, 11 servidores, 399 imágenes .jpg,
-14 archivos .log. Solo existe la carpeta del día actual (no hay histórico de días previos en
-este disco todavía).
+14 archivos .log.
+
+> Corrección (02/10/2026): sí existe histórico — ver más abajo. Además, al 01/10/2026 el nivel de
+> cliente creció a 4: `AbInBev`, `Api_Manzanillo`, `C5i_Colima`, `Pemex` (antes solo se habían visto
+> `AbInBev`/`Others`).
 
 Para desarrollo/pruebas hay un mirror local de esta misma estructura en `Test/Check Plants/`
 dentro del repo (con datos reales pero desconectado de producción), que el usuario va subiendo
 manualmente con logs de días nuevos. Esa carpeta está en `.gitignore` (es desechable, no se
 versiona) — cualquier código que lea `CHECK_PLANTS_ROOT` debe poder apuntar tanto a la ruta real
 (`D:\Imágenes\Quantum Labs\Check Plants`) como a esta carpeta de prueba vía `.env`.
+
+**Histórico real, descubierto 02/10/2026**: `D:\Imágenes\Quantum Labs\Check Plants\1- OLD\` tiene
+**124 días en 2025** (mayo a diciembre) y **18 en 2026** — casi dos años de capturas diarias reales
+por cámara. Es la fuente usada para los Experimentos 1, 3, 4, 5 y 6 de la Fase 2 (ver esa sección),
+y la alternativa elegida en vez de dar acceso directo a cámaras de producción para ampliar el piso
+de ruido (02/10/2026): minar más días de este histórico es casi gratis y no toca infraestructura
+viva, a diferencia de conectarse en vivo a cámaras remotas (que además viven detrás de túneles que
+administra el programa externo de revisión — ver `proxy_ip`/`proxy_port` en `Test/cameras/*.py`).
+
+- **2026** sigue la estructura de arriba: `2026\[Cliente]\[NN- Mes]\[ddmmyy]\[PLANTA]\[SERVIDOR]\`.
+- **2025 usa un formato distinto y más viejo**: `2025\[NN-Mes]\[ddmmyy]\[planta+servidor en
+  minúsculas]\`, sin carpeta de cliente y con planta y servidor fundidos en un solo nombre (ej.
+  `zacatecas01`, `mexico07`). Cualquier código que recorra el histórico completo tiene que tolerar
+  ambos formatos, no solo el de 2026.
 
 El `.log` es un log de proceso con timestamp y nivel (INFO/ERROR), que registra, por servidor:
 apertura de túneles SSH, ping, y por cada cámara: IP, verificación de puerto 80, obtención de
@@ -442,6 +459,36 @@ flowchart TD
      resto del día (hasta 1.71 px vs 0.30 px típico), probablemente por sombras moviéndose rápido.
      Sigue siendo insignificante frente al umbral, pero es la ventana más "ruidosa" del ciclo.
 
+   **Experimento 6 — repuesto para cámaras sin textura** (02/10/2026,
+   `Test/Rev_Local/prueba_correlacion_fase.py` y `prueba_ocupacion_agresiva.py`). ORB no encuentra
+   estructura repetible en `ZAC_A2p`/`ZAC_P1t2` ni siquiera con el texto tapado (Experimento 4). Se
+   probaron dos alternativas basadas en intensidad de píxel, no en esquinas: correlación de fase
+   (`cv2.phaseCorrelate`) y ECC (`cv2.findTransformECC`).
+
+   - **Ambas sí dan un número en las cámaras donde ORB no podía**: 0.8–1.2 px, consistente con "no
+     se movió" (que es la verdad en esos casos). Pero igual que con los inliers de ORB, la confianza
+     cae con la textura: 0.03–0.09 en las cámaras difíciles vs 0.32–0.71 en los controles buenos
+     (correlación de fase) — el mismo patrón de "la medida es correcta pero hay que exigirle
+     confianza", solo que aquí es continuo en vez de un conteo.
+   - **Discrepancia a tener en cuenta**: en `TUX_E3`, ORB daba 0.98 px y estos métodos dan 4.6–4.8 px
+     para el mismo par. No es un error — correlación de fase/ECC estiman un corrimiento global único,
+     sin el filtro de outliers que tiene RANSAC, así que una zona con cambio real (sombra, reflejo)
+     arrastra el resultado completo. No son intercambiables número por número con ORB.
+   - **Prueba de estrés — ocupación agresiva** (lo más importante): la preocupación era que, sin
+     outlier-rejection, un camión dominante pudiera producir un número alto con confianza alta
+     (silenciosamente mal). Con ocupación sintética hasta el 85% del cuadro, ambos métodos siguen
+     correctos (≤0.54 px) y la confianza no cae. Contra los casos reales más extremos conocidos
+     (`ZAC_C2p`, `TOC_B02`, donde ORB dio 561–649 px y 136–179 px con pocos inliers), correlación de
+     fase dio números pequeños (0.23–1.07 px, correctos) con confianza **0.006–0.021** — muy por
+     debajo de cualquier caso bueno, la misma separación limpia que vimos con inliers. ECC fue algo
+     menos limpio (hasta 10 px en un caso) pero su `cc` también cayó con claridad (0.19–0.46 vs
+     0.78–0.91 de los buenos).
+   - **Decidido**: diseño en cascada. ORB+RANSAC primero (más robusto donde hay textura, por el
+     filtro de outliers); si falla por falta de estructura, correlación de fase como repuesto,
+     filtrando por su propio umbral de confianza (orden de magnitud: bueno ≥0.3, malo ≤0.02 — falta
+     afinar el corte exacto con más casos). ECC queda fuera del decisor, como verificación cruzada
+     opcional nada más.
+
    ### 2.2 Diseño decidido (en revisión tras el Experimento 4)
 
    > Los umbrales y tablas de esta sección se calcularon **sin enmascarar el texto sobreimpreso**
@@ -675,7 +722,11 @@ flowchart TD
       transiciones de régimen nunca sobre 1.89 px. Confirma con datos reales (no solo la muestra
       chica de producción) que el umbral de 0.25-0.5% del ancho tiene margen de sobra (~3x sobre el
       peor ruido real, ~30x sobre un movimiento real medido).
-- [ ] Fase 2: probar correlación de fase / ECC para cámaras sin textura suficiente
+- [x] Fase 2: **Experimento 6 (02/10/2026)** — correlación de fase rescata las cámaras sin textura
+      donde ORB falla, y resistió la prueba de estrés de ocupación agresiva (hasta 85% tapado, y los
+      casos reales más extremos conocidos) sin dar nunca un número falso con confianza alta. Diseño
+      en cascada decidido: ORB+RANSAC primero, correlación de fase como repuesto filtrado por
+      confianza
 - [ ] Fase 2: rehacer Experimentos 1-3 con el texto enmascarado
 - [ ] Fase 2: terminar la batería de pruebas con la HIKVISION — línea base lista (Experimento 5);
       faltan movimientos medidos, golpe y regreso repetido con esquinas enmascaradas, obstrucción,
