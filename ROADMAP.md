@@ -489,6 +489,60 @@ flowchart TD
      afinar el corte exacto con más casos). ECC queda fuera del decisor, como verificación cruzada
      opcional nada más.
 
+   **Experimento 7 — minería del histórico real expone un modo de falla más grave: patrones
+   repetitivos** (02/10/2026, `Test/Rev_Local/mina_historico.py` y `diagnostico_fallas.py`). En vez
+   de seguir con la cámara física, se aprovechó el hallazgo del histórico real (ver "Estructura de
+   datos": 320 días en 2026, 124 en 2025) para ampliar el piso de ruido más allá de una sola cámara
+   casera — la alternativa elegida en vez de dar acceso directo a cámaras de producción. Se tomó 1
+   día por mes (marzo-septiembre, único tramo con estructura de carpetas consistente con el formato
+   actual) para 8 cámaras de distintas plantas, comparando **todos los pares** dentro de cada cámara
+   (21 combinaciones) con el método en cascada del Experimento 6.
+
+   De 110 pares concluyentes, la mayoría se comportó bien (medianas de 0.08-5.4 px), pero varios
+   cruzaron el umbral propuesto de forma sistemática. Revisando las imágenes a mano:
+
+   - **`ZACATECAS/QLYMSPROD01/NE` tiene una hilera de reflectantes de pavimento espaciados
+     regularmente.** Comparando marzo vs. septiembre (visualmente idénticas, la cámara NO se movió),
+     el método reportó **86.7-86.8 px — y esta vez AMBOS métodos coincidieron y pasaron sus propios
+     filtros de confianza**: ORB con 110 inliers (por encima del mínimo de ~100 del Experimento 3) y
+     correlación de fase con confianza 0.32 (por encima del 0.15 del Experimento 6). El patrón
+     repetitivo hace que ambos métodos se anclen al reflectante vecino equivocado, de forma
+     consistente, en vez de al correcto — y como ambos se equivocan de la misma manera, uno no
+     delata el error del otro.
+   - **`TOCANCIPA/QLYMSPROD05/EL` es peor todavía**: tiene reflectantes en el piso Y una fila de
+     columnas/vigas idénticas de una estructura elevada perdiéndose hacia el fondo — dos fuentes de
+     periodicidad en la misma imagen. Abril vs. mayo dio **97.1 px con 184 inliers de ORB** (muy por
+     encima del umbral de confianza), mientras que correlación de fase, con razón, desconfió
+     (confianza=0.026, se habría descartado sola) y hubiera dado el valor correcto si se le hiciera
+     caso (0.11 px). Aquí los dos métodos **discrepan fuertemente** en vez de coincidir — y como el
+     diseño en cascada solo recurre a correlación de fase cuando ORB *falla*, no cuando *discrepa*,
+     el sistema se habría quedado con el 97 px de ORB y disparado una alerta falsa.
+   - **`TUXTEPEC/QLYMSPROD06/E3`** (el caso sin textura ya conocido) mostró un problema relacionado
+     pero distinto: en pares de meses lejanos, ORB correctamente se queda sin suficientes inliers
+     (4-10, bien por debajo del mínimo) y cede el paso a correlación de fase — pero esta da
+     **59-62 px con confianza 0.30**, por encima del umbral de 0.15 fijado en el Experimento 6.
+     Revisando las imágenes, la cámara no se movió; lo que cambia con los meses es la suciedad y las
+     manchas del piso, la única "estructura" que correlación de fase tiene para anclarse en una
+     escena casi lisa. **El umbral de 0.15 se calibró con pares de días cercanos (Experimento 6) y
+     no generaliza a comparaciones de meses de distancia** en escenas sin textura real.
+
+   **Conclusión — esto es más serio que "ajustar un número"**: el diseño actual (cada método con su
+   propio umbral de confianza, cascada solo-si-falla) no protege contra el aliasing de patrones
+   repetitivos, porque en el caso de `NE` ambos métodos se equivocan de la misma forma y se
+   corroboran mutuamente sin darse cuenta. Decidido (02/10/2026), pendiente de implementar:
+   - Correr **ambos métodos siempre**, no en cascada solo-si-falla, y tratar el **desacuerdo entre
+     ellos** como señal de alerta en sí misma (el caso `EL` se habría detectado así: 97 px vs.
+     0.11 px es una discrepancia enorme que merece revisión humana sin importar que ORB solo
+     "pasara" su propio umbral).
+   - Evaluar una detección explícita de estructura periódica (ej. picos secundarios en la
+     autocorrelación) para marcar esas cámaras como de mayor riesgo y exigirles más margen o revisión
+     humana obligatoria ante cualquier cambio detectado.
+   - Recalibrar el umbral de confianza de correlación de fase usando pares de meses lejanos, no solo
+     los días cercanos del Experimento 6.
+   - Pregunta abierta sin resolver: si el aliasing puede producir un desplazamiento falso que no es
+     cero, ¿podría también **enmascarar** un movimiento real pequeño (falso negativo), no solo
+     inventar uno que no existe? No se ha probado directamente.
+
    ### 2.2 Diseño decidido (en revisión tras el Experimento 4)
 
    > Los umbrales y tablas de esta sección se calcularon **sin enmascarar el texto sobreimpreso**
@@ -727,6 +781,14 @@ flowchart TD
       casos reales más extremos conocidos) sin dar nunca un número falso con confianza alta. Diseño
       en cascada decidido: ORB+RANSAC primero, correlación de fase como repuesto filtrado por
       confianza
+- [x] Fase 2: **Experimento 7 (02/10/2026)** — minando 110 pares reales de 8 cámaras a lo largo de
+      7 meses se encontró un modo de falla más grave: patrones repetitivos (reflectantes de
+      pavimento, columnas idénticas) engañan a ORB y a correlación de fase **al mismo tiempo**,
+      pasando ambos umbrales de confianza con un número falso (86-97 px en cámaras que no se
+      movieron). El diseño cascada-solo-si-falla no protege contra esto porque a veces los métodos
+      se equivocan igual en vez de corregirse mutuamente. **Pendiente**: correr ambos métodos
+      siempre y tratar su desacuerdo como señal de alerta, y/o detectar estructura periódica
+      explícitamente
 - [ ] Fase 2: rehacer Experimentos 1-3 con el texto enmascarado
 - [ ] Fase 2: terminar la batería de pruebas con la HIKVISION — línea base lista (Experimento 5);
       faltan movimientos medidos, golpe y regreso repetido con esquinas enmascaradas, obstrucción,
