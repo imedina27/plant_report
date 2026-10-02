@@ -415,6 +415,33 @@ flowchart TD
      un método basado en intensidad (correlación de fase o alineación ECC) que no dependa de
      esquinas.
 
+   **Experimento 5 — piso de ruido real sobre un ciclo completo de 24h** (02/10/2026,
+   `Test/Rev_Local/analiza_linea_base.py`). Prueba 1 de la batería con cámara física: 175 capturas
+   cada 10 min, cámara HIKVISION fija, sin tocar, desde 30/09 15:49 hasta 02/10 07:59 sin ningún
+   hueco (el reinicio del 01/10 corrigió la suspensión que había interrumpido el primer intento).
+   Mide consecutivas con las esquinas del texto ya enmascaradas (corrección del Experimento 4).
+
+   | Régimen | Mediana | p95 | Máximo |
+   | --- | --- | --- | --- |
+   | Día (122 pares) | 0.30 px | 1.06 px | 1.71 px (0.064% del ancho) |
+   | Infrarrojo nocturno (47 pares) | 0.19 px | 0.33 px | 0.36 px (0.014%) |
+
+   - **La noche en infrarrojo es MÁS estable que el día**, no menos — sin sol cambiando de ángulo ni
+     reflejos moviéndose, la iluminación artificial es más constante.
+   - **Las transiciones de régimen** (cambio de filtro IR-cut, la transformación más agresiva que
+     sufre esta cámara) se midieron en las 2 ocurrencias del ciclo: 1.89 px y 1.79 px (día→IR, con
+     70 y 32 inliers), 0.94 px y 0.80 px (IR→día, con 321 y 15 inliers). Nunca superaron 1.9 px.
+   - **Margen sobre el umbral propuesto**: el peor momento de un ciclo real completo (1.89 px,
+     0.070% del ancho) queda muy por debajo del umbral de 0.25% (≈7 px en esta resolución) — más de
+     3x de colchón. Comparado con el movimiento real medido en el Experimento 4 (golpe y regreso:
+     64-88 px), la separación es de más de 30x. Esto valida con datos reales, no solo con la muestra
+     pequeña de producción, que el rango de umbral 0.25-0.5% es razonable.
+   - **Único caso no concluyente**: cruzando el hueco de 10h de la suspensión (solo 5 inliers) — es
+     la reacción correcta ante algo genuinamente anómalo, no una falla del método.
+   - **Hallazgo adicional**: las horas 16:18-18:08 (sol de media tarde) muestran más ruido que el
+     resto del día (hasta 1.71 px vs 0.30 px típico), probablemente por sombras moviéndose rápido.
+     Sigue siendo insignificante frente al umbral, pero es la ventana más "ruidosa" del ciclo.
+
    ### 2.2 Diseño decidido (en revisión tras el Experimento 4)
 
    > Los umbrales y tablas de esta sección se calcularon **sin enmascarar el texto sobreimpreso**
@@ -643,10 +670,16 @@ flowchart TD
       produce falsos negativos (cámara movida 65-88 px, reportado como 0.1 px). Invalida los
       umbrales de los Experimentos 1-3. Enmascarar solo las esquinas ayuda pero no alcanza en
       cámaras sin textura (ORB no encuentra estructura repetible en concreto liso).
+- [x] Fase 2: **Experimento 5 (02/10/2026)** — piso de ruido validado sobre 175 capturas / 24h
+      reales sin huecos, con el texto enmascarado: máximo 1.71 px de día, 0.36 px de noche IR,
+      transiciones de régimen nunca sobre 1.89 px. Confirma con datos reales (no solo la muestra
+      chica de producción) que el umbral de 0.25-0.5% del ancho tiene margen de sobra (~3x sobre el
+      peor ruido real, ~30x sobre un movimiento real medido).
 - [ ] Fase 2: probar correlación de fase / ECC para cámaras sin textura suficiente
 - [ ] Fase 2: rehacer Experimentos 1-3 con el texto enmascarado
-- [ ] Fase 2: terminar la batería de pruebas con la HIKVISION (línea base corriendo desde 30/09,
-      faltan movimientos medidos, obstrucción, objeto sin mover, zoom)
+- [ ] Fase 2: terminar la batería de pruebas con la HIKVISION — línea base lista (Experimento 5);
+      faltan movimientos medidos, golpe y regreso repetido con esquinas enmascaradas, obstrucción,
+      objeto sin mover, zoom por API
 - [ ] Fase 2: umbral final calibrado e implementación del módulo
 - [ ] Ventana de revisión implementada
 - [ ] Fase 3 definida (actualización del log)
