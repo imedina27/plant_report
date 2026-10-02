@@ -543,6 +543,43 @@ flowchart TD
      cero, ¿podría también **enmascarar** un movimiento real pequeño (falso negativo), no solo
      inventar uno que no existe? No se ha probado directamente.
 
+   **Experimento 7b — validar la defensa de "correr ambos métodos siempre"** (02/10/2026,
+   `Test/Rev_Local/deteccion_desacuerdo.py`). Se implementó: ORB y correlación de fase corren
+   siempre (no cascada solo-si-falla); si ambos pasan su propio umbral de confianza pero discrepan
+   más de 15 px, se marca `DISCREPANCIA`; si cualquiera confiable da un desplazamiento por encima
+   del umbral de movimiento, se marca `REVISAR` en vez de `OK` silencioso.
+
+   | Caso | Resultado | Detalle |
+   | --- | --- | --- |
+   | `ZAC_NE` marzo vs abril (control, sin mover) | `OK` | ORB 2.48px/55in, Fase 2.22px/conf.61 |
+   | `ZAC_NE` abril vs sept. (el caso que engañó a ambos) | `REVISAR` | ambos de acuerdo en ~87px — ya NO pasa como `OK` |
+   | `TOC_EL` abril vs mayo (discrepancia) | `REVISAR` | ORB 97px/184in vs Fase 0.11px/conf.03 — ya NO se queda con el 97px de ORB sin más |
+   | `TUX_E3` marzo vs julio (sin textura) | `REVISAR` | ORB inservible (4 inliers), Fase 59px — correctamente no pasa como `OK` |
+   | `MED_EP1` marzo vs junio (control, buena textura) | `NO_CONCLUYENTE` | el desplazamiento real es ~2px, pero ningún método junta suficiente confianza a 3 meses de distancia |
+   | `APAN_CS` agosto vs sept. | `REVISAR` | sin investigar a fondo todavía, misma familia de síntoma |
+
+   **Lo que sí se logró**: ningún caso conocido como problemático se cuela como `OK` falso — los
+   tres casos malos del Experimento 7 (`NE`, `EL`, `E3`) ahora escalan a revisión humana en vez de
+   generar una falsa sensación de certeza. Esa es la propiedad de seguridad que importaba.
+
+   **Lo que NO se logró, con honestidad**: el primer intento de detectar la estructura periódica
+   *directamente* (calcular la superficie completa de correlación de fase a mano, vía FFT propio, y
+   buscar un segundo pico casi tan alto como el primero) tenía un error de implementación — dio
+   159 px para `TOC_EL` cuando el cálculo ya validado con `cv2.phaseCorrelate` daba 0.11 px para el
+   mismo par. Se descartó ese intento en vez de reportarlo como funcionando; **queda pendiente**
+   diseñarlo de nuevo, probablemente como autocorrelación de una sola imagen (no correlación cruzada
+   entre dos) para no mezclar la pregunta de "¿hay un patrón repetitivo aquí?" con la de "¿cuánto se
+   movió?". Sin esto, el sistema sabe decir "hay que revisar a mano" pero no "esto probablemente es
+   un patrón repetitivo, no un movimiento real" — que sería más útil para quien revisa.
+   - **Hallazgo adicional**: incluso una cámara con buena textura (`MED_EP1`) cae a `NO_CONCLUYENTE`
+     comparando marzo contra junio (3 meses), a pesar de que el desplazamiento real es mínimo (~2px).
+     Los umbrales de confianza del Experimento 6 se calibraron con pares de días cercanos y pierden
+     fuerza en comparaciones de meses — coherente con lo ya visto en `TUX_E3`, pero ahora confirmado
+     también en una cámara "fácil". En producción esto pesa menos de lo que parece, porque la base
+     de comparación se mantiene vigente (no se compara contra una foto de hace 3 meses), pero sí
+     advierte que **el umbral de confianza debe calibrarse contra el intervalo real de comparación**,
+     no asumir que lo medido con días cercanos generaliza a cualquier plazo.
+
    ### 2.2 Diseño decidido (en revisión tras el Experimento 4)
 
    > Los umbrales y tablas de esta sección se calcularon **sin enmascarar el texto sobreimpreso**
@@ -786,9 +823,13 @@ flowchart TD
       pavimento, columnas idénticas) engañan a ORB y a correlación de fase **al mismo tiempo**,
       pasando ambos umbrales de confianza con un número falso (86-97 px en cámaras que no se
       movieron). El diseño cascada-solo-si-falla no protege contra esto porque a veces los métodos
-      se equivocan igual en vez de corregirse mutuamente. **Pendiente**: correr ambos métodos
-      siempre y tratar su desacuerdo como señal de alerta, y/o detectar estructura periódica
-      explícitamente
+      se equivocan igual en vez de corregirse mutuamente.
+- [x] Fase 2: **Experimento 7b (02/10/2026)** — validado: correr ORB y correlación de fase siempre
+      (no en cascada) y nunca devolver `OK` si alguno excede el umbral de movimiento, sin importar
+      qué tan "confiable" se vea, evita que los 3 casos problemáticos del Experimento 7 pasen como
+      `OK` falso. Pendiente, sin resolver: un primer intento de detectar la estructura periódica
+      directamente (FFT manual) tenía un bug y se descartó — hace falta rediseñarlo como
+      autocorrelación de una sola imagen
 - [ ] Fase 2: rehacer Experimentos 1-3 con el texto enmascarado
 - [ ] Fase 2: terminar la batería de pruebas con la HIKVISION — línea base lista (Experimento 5);
       faltan movimientos medidos, golpe y regreso repetido con esquinas enmascaradas, obstrucción,
