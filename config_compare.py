@@ -207,6 +207,11 @@ _HIKVISION_FIELDS = {
         "ImageChannel.Color.contrastLevel",
         "ImageChannel.Color.saturationLevel",
         "ImageChannel.Dehaze.DehazeMode",
+        # Solo presente en camaras con lente motorizado (ej. sufijo IZS/IZHS).
+        # En lentes fijos el campo no existe y se ignora, igual que cualquier
+        # otro campo ausente (ver _get). Requiere que la descarga externa
+        # incluya PTZCtrl/channels/1/status — no se agrega sola.
+        "PTZStatus.AbsoluteHigh.absoluteZoom",
     ],
     "video": [
         "StreamingChannel.Video.videoCodecType",

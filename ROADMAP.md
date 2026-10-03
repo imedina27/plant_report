@@ -206,7 +206,17 @@ flowchart TD
      **HIKVISION**
      - Imagen: `ImageChannel.{ImageFlip.enabled, IrcutFilter.*, Exposure.*, powerLineFrequency.*,
        Scene.mode, WDR.*, BLC.enabled, NoiseReduce.*, WhiteBalance.*, Sharpness.SharpnessLevel,
-       Gain.GainLevel, Shutter.ShutterLevel, Color.*, Dehaze.DehazeMode}`
+       Gain.GainLevel, Shutter.ShutterLevel, Color.*, Dehaze.DehazeMode}`,
+       `PTZStatus.AbsoluteHigh.absoluteZoom` — agregado 03/10/2026 (ver Fase 2, Experimento 8,
+       Hallazgo 4: el zoom no lo detecta la comparación de imagen, decidido que se vigile aquí).
+       **Implementado en `config_compare.py` pero incompleto**: solo presente en cámaras con lente
+       motorizado (sufijo `IZS`/`IZHS` o similar — el parque es variable, mezcla de marcas y modelos,
+       algunos motorizados y otros no, confirmado por el usuario 03/10/2026); en lente fijo el campo
+       no existe y se ignora igual que cualquier campo ausente. **Depende de un cambio fuera de este
+       repo**: la descarga (`HikvCamConf()` en el programa externo de revisión, no en este proyecto)
+       no llama hoy a `PTZCtrl/channels/1/status` — hay que agregar esa llamada ahí para que el campo
+       llegue a existir en el `.json` que este proyecto lee. Sin ese cambio externo, el campo queda
+       siempre ausente y nunca se compara (no falla, pero tampoco vigila nada).
      - Video: `StreamingChannel.Video.{videoCodecType,videoScanType,videoResolutionWidth,
        videoResolutionHeight,maxFrameRate,GovLength,H264Profile,H265Profile,SVC.enabled,
        SmartCodec.enabled,snapShotImageType}`
@@ -248,17 +258,21 @@ flowchart TD
      índices, subclaves) sin un dump real — inventar esos nombres arriesga que la comparación
      busque un campo que no existe y falle en silencio.
    - Preguntas abiertas:
-     - **Pendiente de entrega**: correr `DahuaCamConf()` (ya en `Test/cameras/dahua.py`) contra
-       una cámara Dahua real y compartir el resultado crudo (el dict, o el texto `key=value` antes
-       de convertir) — igual que ya se hizo con AXIS, HIKVISION y VIVOTEK. Falta también su huella
-       de detección de marca (AXIS: `Brand.Brand == "AXIS"`; HIKVISION: `DeviceInfo["@xmlns"]`
-       conteniendo `hikvision.com`; VIVOTEK: `system.info.firmwareversion` conteniendo `VVTK`).
-     - **Hueco encontrado (03/10/2026, durante la prueba de zoom de Fase 2)**: para HIKVISION con
-       lente motorizado, ni la descarga (`HikvCamConf()`) ni la lista curada de campos tocan
-       `PTZCtrl/channels/1/status` (`absoluteZoom`) — un cambio de zoom hoy no se detecta ni aquí ni
-       en Fase 2 (ver Experimento 8, Hallazgo 4, en la sección 2.5). Si se decide que el zoom debe
-       vigilarse, es aquí donde hay que agregarlo: un endpoint más a la descarga, un campo más a la
-       comparación. Pendiente confirmar qué cámaras del parque real tienen lente motorizado.
+     - **Pendiente de entrega — martes (06/10/2026)**: el usuario va a estar en oficina y podrá dar
+       acceso a una cámara Dahua real para correr `DahuaCamConf()` (ya en `Test/cameras/dahua.py`) y
+       compartir el resultado crudo — igual que ya se hizo con AXIS, HIKVISION y VIVOTEK. Falta
+       también su huella de detección de marca (AXIS: `Brand.Brand == "AXIS"`; HIKVISION:
+       `DeviceInfo["@xmlns"]` conteniendo `hikvision.com`; VIVOTEK:
+       `system.info.firmwareversion` conteniendo `VVTK`).
+     - **Zoom — decidido (03/10/2026): sí debe vigilarse en Fase 1.** Campo `PTZStatus.
+       AbsoluteHigh.absoluteZoom` agregado a la categoría Imagen de HIKVISION en `config_compare.py`,
+       probado contra los 144 `.json` reales del sandbox sin romper nada (el campo está ausente en
+       todos hoy, se ignora limpio). **Queda bloqueado en la mitad**: falta que el programa externo
+       de revisión agregue la llamada a `PTZCtrl/channels/1/status` en su descarga — sin eso el
+       campo nunca va a existir en el `.json` que este proyecto lee, y nunca se comparará nada aunque
+       el código ya esté listo. El parque de cámaras es variable (mezcla de marcas/modelos, algunos
+       motorizados y otros no, confirmado por el usuario) — no hace falta tratarlo como caso especial,
+       la regla de "campo ausente se ignora" ya lo cubre tal cual.
      - ~~Falta diseñar el mecanismo para "aceptar" un cambio legítimo como nueva base~~ —
        **resuelto (30/09/2026)**: se hace con la ventana de revisión descrita en la sección 2.3, que
        aplica igual a Fase 1 (mostrando una tabla de campo / valor base / valor actual en vez de dos
@@ -967,7 +981,11 @@ flowchart TD
 
 ## Estado
 
-- [x] Fase 1 implementada para AXIS/HIKVISION/VIVOTEK (comparación de JSON de configuración) — falta DAHUA
+- [x] Fase 1 implementada para AXIS/HIKVISION/VIVOTEK (comparación de JSON de configuración) — falta
+      DAHUA (pendiente de entrega el martes 06/10/2026)
+- [x] Fase 1: zoom agregado como campo a vigilar para HIKVISION (`PTZStatus.AbsoluteHigh.
+      absoluteZoom`), probado sin romper nada — **bloqueado en la otra mitad**: falta que el programa
+      externo de revisión descargue ese endpoint, fuera del alcance de este repo
 - [x] Fase 2: base de imágenes curada (91 de 143 cámaras; el resto se creará sola)
 - [x] Fase 2: diseño de dos señales + guarda de inliers validado en principio (features+homografía
       como señal principal, diff de píxeles como secundaria) — **umbrales a recalcular** (ver abajo)
@@ -1015,8 +1033,9 @@ flowchart TD
       queda marcado como pendiente de recalibrar con muestra más grande
 - [ ] Fase 2: umbral final calibrado (ahora con datos reales de grados↔píxeles y de confianza de
       fase) e implementación del módulo
-- [ ] Decidir si el zoom debe vigilarse (y en qué fase) y si se agrega a Fase 1 para HIKVISION
-      motorizadas
+- [ ] Coordinar con quien mantenga el programa externo de revisión para agregar
+      `PTZCtrl/channels/1/status` a la descarga de HIKVISION (bloqueante para que el zoom de Fase 1
+      sirva de algo en la práctica)
 - [ ] Ventana de revisión implementada
 - [ ] Fase 3 definida (actualización del log)
 - [ ] Fase 4 definida (persistencia en base de datos)
