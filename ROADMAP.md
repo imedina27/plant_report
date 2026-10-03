@@ -752,10 +752,41 @@ flowchart TD
 4. **Persistencia en base de datos**
    Guardar los resultados (logs + comparaciones) en una base de datos.
    - Decidido: PostgreSQL, ya hay un servidor disponible.
+   - Decidido (03/10/2026) — **perfil estadístico por cámara, no umbrales globales fijos**. Surge
+     directamente de los Experimentos 1-7 (Fase 2): hoy cada cámara se mide contra el mismo umbral
+     (0.25% del ancho, 100 inliers, confianza 0.15) sin importar su "personalidad" — y ya vimos que
+     no son iguales (`MED_EP1` pierde confianza con brechas de meses; `ZAC_NE`/`TOC_EL` tienen un
+     ruido natural de ~85-97 px por sus reflectantes, muy por encima del umbral global, sin haberse
+     movido nunca).
+     - **No es un modelo de machine learning** — es una línea base estadística por cámara
+       (mediana/p95 de su propio histórico) más un ciclo de retroalimentación humana. Más simple de
+       construir y, importante para el reporte ejecutivo, **explicable**: la respuesta a "¿por qué
+       no alertó esta cámara?" es "su histórico normal es así", no una caja negra.
+     - **Riesgo a evitar, identificado desde el diseño**: si el perfil se alimenta con medidas
+       crudas sin validar, el sistema aprendería a ignorar exactamente las cámaras más propensas a
+       fallar (se acostumbraría a los 85 px de `NE` y dejaría de notar un movimiento real de 90 px,
+       o perdería sensibilidad a movimientos menores que su propio "ruido" ya inflado).
+     - **Mitigación decidida**: el perfil se alimenta del **veredicto humano de la ventana de
+       revisión** (sección 2.3), no de la estadística cruda sin más. Un clic en "Bien" es la señal
+       de "este número en esta cámara es ruido confirmado"; un clic en "Mal" es la señal contraria.
+       El aprendizaje queda anclado a juicio humano confirmado, no a varianza ciega.
+     - Boceto de esquema (a refinar cuando arranque esta fase):
+       - `historial_comparacion`: una fila por cámara por día — desplazamiento e inliers de ORB,
+         desplazamiento y confianza de correlación de fase, decisión del sistema, y el veredicto
+         humano si lo hubo (Bien/Mal/Sustituir Base). Es el registro crudo.
+       - `perfil_camara`: una fila por cámara, derivada del historial — mediana y p95 de
+         desplazamiento confirmado como ruido, si tiene patrón periódico conocido, su confianza
+         típica, última fecha de recálculo.
+     - **Idea adicional, de menor riesgo**: guardar el **brillo típico por hora del día** de cada
+       cámara (ya sabemos del Experimento 5 que hay un patrón predecible día/transición IR/noche).
+       No sirve para detectar movimiento, pero sí para el problema de **obstrucción/lente sucio**:
+       comparar el brillo de hoy contra lo típico de esa cámara a esa hora, sin necesitar imagen
+       base. Es un uso independiente del Método 1 (contenido), no del Método 2 (geometría).
    - Preguntas abiertas:
      - ¿Datos de conexión al servidor (host, puerto, nombre de BD)? ¿Cómo se van a manejar las
        credenciales (variables de entorno, archivo `.env`, etc.)?
-     - ¿Ya existe un esquema o hay que diseñarlo desde cero?
+     - ¿Ya existe un esquema o hay que diseñarlo desde cero? (ver boceto arriba para la parte de
+       perfiles por cámara — sigue faltando el resto: resultados de Fase 1, resumen por corrida, etc.)
      - ¿Se necesita conservar histórico de todas las corridas o solo el estado más reciente?
 
 5. **Reporte ejecutivo**
