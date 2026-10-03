@@ -329,6 +329,12 @@ _VIVOTEK_IMAGE_FIELDS = [
     "videoin.c0.aespeed.mode",
     "videoin.c0.aespeed.speedlevel",
     "videoin.c0.aespeed.sensitivity",
+    # Candidato para vigilar zoom (agregado 03/10/2026), visto en un dump real
+    # (Test/VIVOTEK-IP9181-192.168.81.80.json) pero esa camara en particular no
+    # tiene modulo de zoom motorizado (capability.camctrl.c0.zoommodule=0), asi
+    # que no se pudo confirmar que el valor cambie con un zoom real (a
+    # diferencia del campo de HIKVISION, que si se probo con la camara fisica).
+    "videoin.c0.zoomratiodisplay",
 ]
 
 _VIVOTEK_NETWORK_FIELDS = [

@@ -202,6 +202,16 @@ flowchart TD
        `Network.SSH.Enabled`, `Network.UPnP.Enabled` (a propósito, fuera de alcance por ahora:
        `RTP.R0`-`R7` multicast, `QoS.*`, `IPv6.*`, `dot1x.*` — protocolo avanzado, poco propenso a
        cambiar manualmente y genera mucho ruido)
+     - **Zoom — pendiente, sin verificar (03/10/2026).** Se buscó en un `.json` real
+       (`Api_Manzanillo/.../SP-OMS01.json`) y lo único relacionado a zoom que aparece son
+       **capacidades estáticas del hardware** (`PTZ.Limit.L{n}.MaxZoom`, `PTZ.Support.S{n}.
+       AbsoluteZoom`, `PTZ.Various.V{n}.ZoomEnabled`) — "¿puede hacer zoom?", no "¿en qué zoom está
+       ahora?". El valor **en vivo** no está en esta llamada (`param.cgi?action=list&group=root`) en
+       absoluto; en VAPIX vendría de un endpoint distinto (`ptz.cgi?query=position`, no confirmado
+       contra una cámara real), que ni está en la descarga de `AxisCamConf()` hoy ni se sabe cómo se
+       vería convertido a JSON (responde texto plano `pan=:tilt=:zoom=`, formato distinto al que ya
+       se procesa). **Mismo nivel de incertidumbre que DAHUA** — no inventar el nombre del campo
+       hasta probarlo en vivo contra una cámara AXIS con lente motorizado real.
 
      **HIKVISION**
      - Imagen: `ImageChannel.{ImageFlip.enabled, IrcutFilter.*, Exposure.*, powerLineFrequency.*,
@@ -237,7 +247,12 @@ flowchart TD
        `image.c0.scene.mode`, `videoin.c0.{whitebalance,exposurelevel,irismode,maxgain,mingain,
        color,flip,mirror,rotate,cmosfreq}`, `videoin.c0.wdrc.{mode,strength}`,
        `videoin.c0.wdrpro.mode`, `videoin.c0.piris.{mode,position}`,
-       `videoin.c0.aespeed.{mode,speedlevel,sensitivity}`
+       `videoin.c0.aespeed.{mode,speedlevel,sensitivity}`, `videoin.c0.zoomratiodisplay` — agregado
+       03/10/2026. Visto en el dump real, pero esa cámara de muestra no tiene módulo de zoom
+       motorizado (`capability.camctrl.c0.zoommodule=0`), así que **no se pudo confirmar que el
+       valor cambie con un zoom real** (a diferencia de HIKVISION, verificado en vivo con la cámara
+       física). Riesgo bajo de agregarlo igual — el campo sí existe en datos reales, lo peor que
+       puede pasar es que nunca capture nada útil, no que falle en silencio.
      - Video: `videoin.c0.sN.codectype`, `videoin.c0.sN.resolution`,
        `videoin.c0.sN.{h264,h265}.{profile,maxframe,prioritypolicy}`,
        `videoin.c0.sN.mjpeg.maxframe` (N = 0, 1, 2 — un stream por cada perfil de calidad)
@@ -256,7 +271,9 @@ flowchart TD
      la API documentada hay indicios razonables de qué secciones existen (`Network`, `VideoColor`,
      `Encode`), pero **no se puede garantizar el nombre exacto de cada campo** (mayúsculas,
      índices, subclaves) sin un dump real — inventar esos nombres arriesga que la comparación
-     busque un campo que no existe y falle en silencio.
+     busque un campo que no existe y falle en silencio. **Cuando llegue el dump real (martes
+     06/10/2026), revisar también si trae algún campo de zoom en vivo**, igual que se hizo para
+     AXIS/HIKVISION/VIVOTEK el 03/10/2026 — no asumir que no aplica solo porque no se ha visto.
    - Preguntas abiertas:
      - **Pendiente de entrega — martes (06/10/2026)**: el usuario va a estar en oficina y podrá dar
        acceso a una cámara Dahua real para correr `DahuaCamConf()` (ya en `Test/cameras/dahua.py`) y
@@ -983,9 +1000,17 @@ flowchart TD
 
 - [x] Fase 1 implementada para AXIS/HIKVISION/VIVOTEK (comparación de JSON de configuración) — falta
       DAHUA (pendiente de entrega el martes 06/10/2026)
-- [x] Fase 1: zoom agregado como campo a vigilar para HIKVISION (`PTZStatus.AbsoluteHigh.
-      absoluteZoom`), probado sin romper nada — **bloqueado en la otra mitad**: falta que el programa
-      externo de revisión descargue ese endpoint, fuera del alcance de este repo
+- [x] Fase 1: zoom — pedido explícitamente (03/10/2026) que se vigile en **todas** las marcas, no
+      solo HIKVISION. Estado real por marca tras revisar dumps reales:
+      - HIKVISION: campo agregado (`PTZStatus.AbsoluteHigh.absoluteZoom`), verificado en vivo con la
+        cámara física — **bloqueado en la otra mitad**: falta que el programa externo de revisión
+        descargue ese endpoint, fuera del alcance de este repo
+      - VIVOTEK: campo agregado (`videoin.c0.zoomratiodisplay`), visto en dump real pero sin
+        verificar con un zoom real (la cámara de muestra no es motorizada)
+      - AXIS: **no se pudo agregar** — el dump real solo trae capacidades estáticas (¿puede hacer
+        zoom?), no el valor en vivo; ese dato ni siquiera está en la descarga actual. Mismo nivel de
+        incertidumbre que DAHUA, pendiente de una cámara AXIS motorizada real para probarlo
+      - DAHUA: pendiente del dump del martes — cuando llegue, revisar también si trae zoom
 - [x] Fase 2: base de imágenes curada (91 de 143 cámaras; el resto se creará sola)
 - [x] Fase 2: diseño de dos señales + guarda de inliers validado en principio (features+homografía
       como señal principal, diff de píxeles como secundaria) — **umbrales a recalcular** (ver abajo)
