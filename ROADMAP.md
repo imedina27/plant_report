@@ -253,6 +253,12 @@ flowchart TD
        de convertir) — igual que ya se hizo con AXIS, HIKVISION y VIVOTEK. Falta también su huella
        de detección de marca (AXIS: `Brand.Brand == "AXIS"`; HIKVISION: `DeviceInfo["@xmlns"]`
        conteniendo `hikvision.com`; VIVOTEK: `system.info.firmwareversion` conteniendo `VVTK`).
+     - **Hueco encontrado (03/10/2026, durante la prueba de zoom de Fase 2)**: para HIKVISION con
+       lente motorizado, ni la descarga (`HikvCamConf()`) ni la lista curada de campos tocan
+       `PTZCtrl/channels/1/status` (`absoluteZoom`) — un cambio de zoom hoy no se detecta ni aquí ni
+       en Fase 2 (ver Experimento 8, Hallazgo 4, en la sección 2.5). Si se decide que el zoom debe
+       vigilarse, es aquí donde hay que agregarlo: un endpoint más a la descarga, un campo más a la
+       comparación. Pendiente confirmar qué cámaras del parque real tienen lente motorizado.
      - ~~Falta diseñar el mecanismo para "aceptar" un cambio legítimo como nueva base~~ —
        **resuelto (30/09/2026)**: se hace con la ventana de revisión descrita en la sección 2.3, que
        aplica igual a Fase 1 (mostrando una tabla de campo / valor base / valor actual en vez de dos
@@ -644,7 +650,7 @@ flowchart TD
      / valor actual, con los mismos tres botones. Resuelve el mecanismo de "aceptar cambio como
      nueva base" que estaba pendiente en ambas fases.
 
-   ### 2.4 Batería de pruebas con cámara física (pendiente de ejecutar)
+   ### 2.4 Batería de pruebas con cámara física (ejecutada 03/10/2026 — ver resultados en 2.5)
 
    Las cámaras de producción no se pueden mover. El experimento sintético tiene un límite honesto:
    deformar una imagen en 2D y luego medirla con un método que **estima transformaciones 2D** es en
@@ -730,9 +736,88 @@ flowchart TD
    con datos reales en vez de estimados, y (b) verificar el mínimo de inliers por debajo del cual
    no hay que confiar en el número.
 
+   ### 2.5 Experimento 8 — resultados de la batería con cámara física (03/10/2026)
+
+   Ejecutada contra la HIKVISION `iDS-2CD7A46G0/P-IZHS` (lente motorizado) montada en trípode
+   graduado cada 10°, cocina con buena textura y objetos a distancias variadas (1-3 m). ~24 capturas
+   analizadas con el método validado del Experimento 7b (ORB+RANSAC y correlación de fase, siempre
+   los dos, esquinas del texto enmascaradas).
+
+   **Hallazgo 1 — el "a ojo" deja un residuo estable, no aleatorio.** Al reacomodar la cámara a su
+   posición original antes del bloque de obstrucción, quedó un desfase de ~150-155 px (contra la
+   referencia inicial) que se mantuvo **idéntico** durante todo el resto de la sesión (obstrucción,
+   objeto, zoom) — no fue ruido ni deriva, fue una posición nueva y estable, distinta de la original.
+   Esto en sí mismo es el hallazgo del golpe-y-regreso funcionando como se esperaba: un reacomodo a
+   ojo no es "quedar igual", es una posición nueva que hay que volver a medir.
+
+   **Hallazgo 2 — golpe y regreso, con verdad conocida real**: los 7 intentos de "mover y regresar a
+   ojo" dieron entre **118 y 420 px de residuo** contra la referencia original — todos correctamente
+   marcados `REVISAR` por el sistema. Confirma con datos reales (no estimados) que un reacomodo
+   manual sin instrumentos dista mucho de ser exacto, y valida por qué la ventana de revisión
+   (sección 2.3) es necesaria y no un exceso de precaución.
+
+   **Hallazgo 3 — obstrucción y objeto: comportamiento limpio**, re-analizado contra una línea base
+   local (sin el residuo del Hallazgo 1 de por medio):
+
+   | Prueba | Decisión | Geometría | Contenido |
+   | --- | --- | --- | --- |
+   | Obstrucción 25-50% | `OK` | 1.3 px | 35-53 |
+   | Obstrucción 80% | `REVISAR` (límite) | 7.0 px, solo 34 inliers | 66 |
+   | Obstrucción 95% | `NO_CONCLUYENTE` | sin suficientes puntos | 60 |
+   | Persona enfrente | `OK` | 0.52 px | 16 |
+   | Objeto grande | `OK` | 0.44 px | 51 |
+
+   Exactamente lo esperado: estable mientras hay suficiente estructura visible, honestamente "no
+   concluyente" cuando ya no queda nada que medir (igual que se vio en el Experimento 2 con la
+   obstrucción simulada), y el contenido sube con la ocupación.
+
+   **Hallazgo 4 — el zoom es un punto ciego de la geometría, confirmado y con alcance decidido.**
+   Los cambios de zoom (absoluteZoom 30→35→45→65, ver más abajo) dieron 0.19-0.65 px — **todos
+   `OK`**. La homografía absorbe el cambio de escala sin interpretarlo como movimiento. Se investigó
+   si Fase 1 lo cubre por otro lado (el usuario preguntó esto directamente) — **no lo cubre**,
+   verificado en el código: ni la lista de descarga de `HikvCamConf()` (`Test/cameras/hikvision.py`)
+   ni la lista curada de campos HIKVISION en `config_compare.py` tocan `PTZCtrl/channels/1/status`
+   (donde vive `absoluteZoom`, encontrado en el Hallazgo 6 más abajo). **Decidido**: si se quiere
+   cubrir, va en Fase 1 (agregar el endpoint a la descarga y el campo a la comparación), no en
+   Fase 2 — es un dato de configuración, no de geometría. Es específico de cámaras con lente
+   motorizado (`IZHS` u equivalente); en lentes fijos el campo simplemente no existiría, igual que
+   ya se tolera con cualquier campo ausente. Pendiente confirmar qué parte del parque de cámaras
+   tiene lente motorizado antes de implementarlo.
+
+   **Hallazgo 5 — la relación grados↔píxeles real es ~10x mayor que la simulada, y es específica de
+   cada escena.** Usando las marcas confiables del trípode (10°/20°, no las interpoladas a ojo):
+
+   | Movimiento | Medido | Predicho por el Experimento 2 (simulación 2D) |
+   | --- | --- | --- |
+   | 1° horizontal | 123 px* | ~6.5 px |
+   | 10° horizontal | 709 px | ~65 px |
+   | 20° horizontal | 1321 px | ~130 px |
+
+   (*el valor de 1° es el menos confiable — interpolado a ojo entre marcas de 10°, no medido con
+   precisión angular.)
+
+   La simulación giraba la imagen en 2D sin paralaje; en la realidad, con objetos cercanos (1-3 m,
+   como esta cocina), el mismo giro físico produce un corrimiento de píxeles mucho mayor. Esto
+   **no invalida el método** — refuerza con evidencia directa la Decisión de Fase 4 (perfil
+   estadístico por cámara, no un umbral único): una cámara mirando de cerca necesita mucho más
+   margen en píxeles que una cámara de patio mirando a 20 metros, para el mismo grado real de
+   movimiento. El umbral de 0.25-0.5% del ancho puede ser demasiado sensible para cámaras de interior
+   cercanas y demasiado laxo para escenas muy lejanas — es exactamente el tipo de calibración que el
+   perfil por cámara (Fase 4) está diseñado para resolver.
+
+   **Hallazgo 6 — de paso, se documentó el control de zoom por API** (útil si se decide cerrar el
+   punto ciego del Hallazgo 4): `PTZCtrl/channels/1/status` reporta `absoluteZoom` (valor absoluto,
+   no relativo); se cambia con `PUT PTZCtrl/channels/1/absolute` enviando ese mismo campo —
+   controlado y reversible, a diferencia de `PTZCtrl/channels/1/continuous` (pulsos de velocidad×
+   tiempo) que se probó primero y **dejó la cámara completamente desenfocada** sin cambiar el
+   encuadre (el "zoom" continuo en este modelo parece mover principalmente el grupo de enfoque, no
+   el campo de visión). Se recuperó cambiando `Image/channels/1/FocusConfiguration` a `AUTO`
+   temporalmente — modo que se dejó así de forma permanente a petición del usuario, en vez de
+   regresar a `SEMIAUTOMATIC` como estaba originalmente.
+
    - Preguntas abiertas:
-     - **Pendiente de entrega**: IP y credenciales de la cámara HIKVISION de prueba (para el `.env`
-       de `Test/Camara_Fisica/`), y si es varifocal (define si se hace la prueba 6 de zoom).
+     - ¿Qué parte del parque de cámaras de producción tiene lente motorizado (candidatas a necesitar
+       el campo de zoom en Fase 1)? Sin esto no se puede dimensionar el Hallazgo 4.
      - Cuando ya haya varios días acumulados, ¿el programa debe procesar solo el día más reciente,
        un rango de fechas, o todos los pendientes de procesar?
      - ¿Qué reporta una cámara que ese día falló en el log (`Timed out`, sin `.jpg`)? Propuesta:
@@ -861,11 +946,17 @@ flowchart TD
       `OK` falso. Pendiente, sin resolver: un primer intento de detectar la estructura periódica
       directamente (FFT manual) tenía un bug y se descartó — hace falta rediseñarlo como
       autocorrelación de una sola imagen
+- [x] Fase 2: **Experimento 8 (03/10/2026)** — batería completa con la HIKVISION física: golpe y
+      regreso da 118-420 px de residuo real (todo correctamente `REVISAR`); obstrucción y objeto se
+      comportan como se esperaba; el zoom es un punto ciego confirmado de la geometría (0.2-0.65 px,
+      `OK`, y tampoco lo cubre Fase 1 hoy — ver pendiente ahí); y la relación grados↔píxeles real
+      resultó ~10x mayor que la simulada por el paralaje de objetos cercanos, reforzando con datos
+      la necesidad del perfil por cámara de Fase 4
 - [ ] Fase 2: rehacer Experimentos 1-3 con el texto enmascarado
-- [ ] Fase 2: terminar la batería de pruebas con la HIKVISION — línea base lista (Experimento 5);
-      faltan movimientos medidos, golpe y regreso repetido con esquinas enmascaradas, obstrucción,
-      objeto sin mover, zoom por API
-- [ ] Fase 2: umbral final calibrado e implementación del módulo
+- [ ] Fase 2: umbral final calibrado (ahora con datos reales de grados↔píxeles) e implementación del
+      módulo
+- [ ] Decidir si el zoom debe vigilarse (y en qué fase) y si se agrega a Fase 1 para HIKVISION
+      motorizadas
 - [ ] Ventana de revisión implementada
 - [ ] Fase 3 definida (actualización del log)
 - [ ] Fase 4 definida (persistencia en base de datos)
