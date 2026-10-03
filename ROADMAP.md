@@ -901,6 +901,22 @@ flowchart TD
        - `perfil_camara`: una fila por cámara, derivada del historial — mediana y p95 de
          desplazamiento confirmado como ruido, si tiene patrón periódico conocido, su confianza
          típica, última fecha de recálculo.
+     - Decidido (03/10/2026), reforzado directamente por los Experimentos 8 y 9 del mismo día —
+       **arranque en frío y método preferido por cámara**, dos refinamientos a `perfil_camara`:
+       - **Arranque en frío**: una cámara nueva no tiene historial. Usa el umbral global (0.25% del
+         ancho) hasta acumular suficientes comparaciones **confirmadas por un humano** en la ventana
+         de revisión (ej. 10-15), y a partir de ahí cambia a su propio perfil. Nunca se queda sin
+         protección mientras aprende.
+       - **Método preferido por cámara**: el Experimento 9 mostró que algunas cámaras
+         (`ZAC_E1p`, `ZAC_P1p`, `MED_B03`) casi no tienen estructura real que ORB pueda aprovechar —
+         dependen de correlación de fase para dar cualquier respuesta. `perfil_camara` debería guardar
+         cuál señal ha sido confiable para esa cámara en particular (ORB, fase, o ambas), para no
+         perder tiempo ni generar falsos `NO_CONCLUYENTE` confiando en un método que ya se sabe que
+         no le sirve a esa cámara específica.
+       - Justificación concreta del porqué un umbral único no alcanza: el Experimento 8 midió que el
+         mismo giro físico produce ~123 px en una escena cercana (objetos a 1-3 m) pero ordenes de
+         magnitud menos en una escena lejana (patio a 20 m) — la misma cantidad de movimiento real se
+         ve muy distinta en píxeles según la cámara.
      - **Idea adicional, de menor riesgo**: guardar el **brillo típico por hora del día** de cada
        cámara (ya sabemos del Experimento 5 que hay un patrón predecible día/transición IR/noche).
        No sirve para detectar movimiento, pero sí para el problema de **obstrucción/lente sucio**:
