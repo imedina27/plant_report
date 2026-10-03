@@ -815,6 +815,45 @@ flowchart TD
    temporalmente — modo que se dejó así de forma permanente a petición del usuario, en vez de
    regresar a `SEMIAUTOMATIC` como estaba originalmente.
 
+   ### 2.6 Experimento 9 — rehaciendo los Experimentos 1 y 3 con el texto enmascarado (03/10/2026)
+
+   Los Experimentos 1 y 3 (ver 2.1) se habían calculado **sin** la corrección de esquinas del
+   Experimento 4 — quedaron marcados como provisionales. Se rehicieron con el pipeline actual
+   (`Test/Rev_Local/rehacer_exp_1_3.py`): esquinas enmascaradas, ORB+RANSAC y correlación de fase
+   siempre los dos (Experimento 7b), mismos 15 + 16 pares originales.
+
+   **Experimento 1 — la corrección funciona, con un matiz nuevo.** Casi todos los pares "misma
+   cámara" resuelven limpio en `OK`. Pero `ZAC_A2p` (antes 405 inliers / 0.15 px, se veía perfecto)
+   ahora da `NO_CONCLUYENTE` — sin el texto, ORB no encuentra nada ahí. `ZAC_P2t2` pasa a `OK` por
+   muy poco, cuando antes tenía 338 inliers cómodos: ORB cae a 5 inliers y la decisión termina
+   dependiendo de que la fase alcance apenas 0.17 de confianza (umbral 0.15). Los pares de "cámaras
+   distintas" no se re-evaluaron esta vez (son de resoluciones distintas entre sí, lo cual ya es de
+   por sí una señal trivial de "otra cámara" sin necesidad de correr la geometría).
+
+   **Experimento 3 — esto cambia la conclusión original de forma sustancial.** La conclusión de
+   2.1 era "12 de 16 funcionan muy bien, el corte de ~100 inliers separa limpio lo bueno de lo
+   malo". Con las esquinas bien tapadas:
+
+   | Cámara | Inliers ORB antes | Inliers ORB ahora | Veredicto ahora |
+   | --- | --- | --- | --- |
+   | `ZAC_E1p` (3 pares) | 428–607 (el mejor caso de la prueba) | 7–28 | `NO_CONCLUYENTE` los 3 |
+   | `ZAC_P1p` (2 pares) | 186–383 | 4–7 | `NO_CONCLUYENTE` los 2 |
+   | `MED_B03` | 122 | 1 | `NO_CONCLUYENTE` |
+   | `TOC_B02` (ya conocido como malo) | 61–87, número falso | 112–175 (**ahora pasa el filtro**), mismo número falso | `REVISAR` (no `OK` — la salvaguarda del Experimento 7b sigue funcionando) |
+   | `ZAC_E1t1`, `ZAC_R2t2`, `MED_B02-C` | Buenos | Siguen buenos | `OK` |
+
+   **Lectura honesta**: varias cámaras que parecían "fáciles" (E1p, P1p, MED_B03) sacaban casi toda
+   su confianza del texto sobreimpreso, no de la escena real — el mismo problema de fondo del
+   Experimento 4, visto ahora desde el ángulo contrario (inflaba inliers en vez de inventar
+   desplazamientos). Al taparlo correctamente, **no mienten en ningún caso** (todo lo que antes daba
+   un número confiable, ahora sigue bien o pasa honestamente a `NO_CONCLUYENTE`), pero la fracción
+   real de cámaras "fácilmente medibles por ORB" es menor de lo que se reportó en 2.1 — habrá que
+   apoyarse más de lo esperado en correlación de fase (Experimento 6) y en el perfil por cámara
+   (Fase 4) para las cámaras que queden en esa zona gris.
+   - **Pendiente**: el umbral de confianza de fase (0.15) sigue viéndose como un corte algo
+     arbitrario — varios casos quedan muy cerca por abajo (0.06–0.12) o por arriba (0.17–0.29).
+     Vale la pena recalibrarlo con una muestra más grande antes de fijarlo en el módulo final.
+
    - Preguntas abiertas:
      - ¿Qué parte del parque de cámaras de producción tiene lente motorizado (candidatas a necesitar
        el campo de zoom en Fase 1)? Sin esto no se puede dimensionar el Hallazgo 4.
@@ -952,9 +991,14 @@ flowchart TD
       `OK`, y tampoco lo cubre Fase 1 hoy — ver pendiente ahí); y la relación grados↔píxeles real
       resultó ~10x mayor que la simulada por el paralaje de objetos cercanos, reforzando con datos
       la necesidad del perfil por cámara de Fase 4
-- [ ] Fase 2: rehacer Experimentos 1-3 con el texto enmascarado
-- [ ] Fase 2: umbral final calibrado (ahora con datos reales de grados↔píxeles) e implementación del
-      módulo
+- [x] Fase 2: **Experimento 9 (03/10/2026)** — Experimentos 1 y 3 rehechos con esquinas enmascaradas.
+      Confirma que el diseño nunca miente, pero revela que varias cámaras que parecían fáciles
+      (`ZAC_E1p`, `ZAC_P1p`, `MED_B03`) sacaban su confianza del texto sobreimpreso, no de la escena
+      real — con la corrección caen a `NO_CONCLUYENTE`. La fracción de cámaras medibles por ORB solo
+      es menor de lo reportado en el Experimento 3 original; el umbral de confianza de fase (0.15)
+      queda marcado como pendiente de recalibrar con muestra más grande
+- [ ] Fase 2: umbral final calibrado (ahora con datos reales de grados↔píxeles y de confianza de
+      fase) e implementación del módulo
 - [ ] Decidir si el zoom debe vigilarse (y en qué fase) y si se agrega a Fase 1 para HIKVISION
       motorizadas
 - [ ] Ventana de revisión implementada
