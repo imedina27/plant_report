@@ -316,6 +316,9 @@ flowchart TD
 2. **Comparación de imágenes de cámara**
    Para cada cámara, obtener la imagen actual y compararla contra una imagen base de referencia
    para detectar si la cámara se movió.
+   - **Implementado (03/10/2026)** en `image_compare.py` + `main.py` — ver el detalle completo,
+     los 9 experimentos que lo respaldan, y los resultados de la prueba end-to-end en el checklist
+     de Estado al final de este documento.
    - Decidido: las imágenes se obtienen de la carpeta descrita arriba (`[CAMARA].jpg` por
      servidor/planta/día).
    - Decidido: `[CAMARA]_ai.jpg` es la salida de un sistema de IA ya existente (a reutilizar,
@@ -1074,12 +1077,23 @@ flowchart TD
       real — con la corrección caen a `NO_CONCLUYENTE`. La fracción de cámaras medibles por ORB solo
       es menor de lo reportado en el Experimento 3 original; el umbral de confianza de fase (0.15)
       queda marcado como pendiente de recalibrar con muestra más grande
-- [ ] Fase 2: umbral final calibrado (ahora con datos reales de grados↔píxeles y de confianza de
-      fase) e implementación del módulo
+- [x] Fase 2: **módulo implementado (03/10/2026)** — `image_compare.py` + integrado en `main.py`
+      junto a Fase 1, en la misma corrida por cámara. Probado end-to-end contra las 210 cámaras del
+      sandbox (0 errores): 173 `OK`, 28 `NO CONCLUYENTE`, 8 `REVISAR`, 2 `SIN ARCHIVO` (config o
+      imagen faltante ese día, tolerado de forma independiente por cada fase). Confirma en
+      producción lo que predijeron los experimentos: `ZACATECAS/A2p` cae en `NO CONCLUYENTE`
+      (la cámara sin textura real identificada en el Experimento 9), y las cámaras que quedaron
+      pendientes en la curación manual (ej. `MEDELLIN/B04-B06`) generan su base sola, sin haber
+      necesitado curación a mano — confirma el Experimento 3. Umbral de movimiento detrás de
+      `umbral_para()` (hoy regresa el global, listo para engancharse a `perfil_camara` sin tocar el
+      resto del módulo cuando exista Fase 4). Variable de entorno nueva: `IMAGE_BASE_ROOT`.
+      Dependencias nuevas en el Pipfile principal: `opencv-python`, `numpy`.
+- [ ] Fase 2: recalibrar el umbral de confianza de fase (0.15, pendiente desde el Experimento 9) y
+      el umbral de movimiento (0.25%) con más datos reales de producción
 - [ ] Coordinar con quien mantenga el programa externo de revisión para agregar
       `PTZCtrl/channels/1/status` a la descarga de HIKVISION (bloqueante para que el zoom de Fase 1
       sirva de algo en la práctica)
-- [ ] Ventana de revisión implementada
+- [ ] Ventana de revisión implementada (el módulo ya genera el estado `REVISAR` que la alimentaría)
 - [ ] Fase 3 definida (actualización del log)
 - [ ] Fase 4 definida (persistencia en base de datos)
 - [ ] Fase 5 definida (reporte ejecutivo)
