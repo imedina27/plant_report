@@ -202,23 +202,34 @@ flowchart TD
        `Network.SSH.Enabled`, `Network.UPnP.Enabled` (a propósito, fuera de alcance por ahora:
        `RTP.R0`-`R7` multicast, `QoS.*`, `IPv6.*`, `dot1x.*` — protocolo avanzado, poco propenso a
        cambiar manualmente y genera mucho ruido)
-     - **Zoom — pendiente, sin verificar en vivo (03/10/2026, revisado con más cuidado el mismo
-       día).** Se buscó en un `.json` real (`Api_Manzanillo/.../SP-OMS01.json`) y lo único
-       relacionado a zoom que aparece son **capacidades estáticas del hardware**
-       (`PTZ.Limit.L{n}.MaxZoom`, `PTZ.Support.S{n}.AbsoluteZoom`, `PTZ.Various.V{n}.ZoomEnabled`) —
-       "¿puede hacer zoom?", no "¿en qué zoom está ahora?". **Esa cámara en particular (`Brand.
-       ProdShortName = AXIS M1135`) es de lente fijo, sin zoom óptico** — los campos que trae son
-       valores genéricos del árbol de parámetros PTZ que AXIS expone aunque el hardware no lo
-       soporte, no evidencia de una cámara motorizada real.
-       El valor **en vivo** no está en `param.cgi?action=list&group=root` en absoluto. Se confirmó
-       (vía documentación oficial de AXIS, `developer.axis.com/vapix/network-video/pantiltzoom-api/`,
-       no solo por memoria) que vendría de `GET /axis-cgi/com/ptz.cgi?query=position`, que responde
-       texto plano `pan=X tilt=Y zoom=Z iris=... focus=... autofocus=on/off` (formato distinto al
-       dotted `root.X.Y=Z` que `dic_to_json()` ya procesa, necesitaría su propio parser). Esto
-       confirma que el endpoint existe y el formato esperado, pero **sigue sin probarse contra una
-       cámara real ni contra una AXIS con lente motorizado** — a diferencia del campo de HIKVISION,
-       que sí se validó en vivo con la cámara física. No inventar el nombre final del campo en
-       `config_compare.py` hasta tener esa prueba.
+     - **Zoom — pendiente, sin verificar en vivo (03/10/2026, corregido el mismo día tras una
+       observación del usuario).** Se buscó en un `.json` real (`Api_Manzanillo/.../SP-OMS01.json`)
+       y lo único relacionado a zoom que aparece son **capacidades del "driver" PTZ, no del lente
+       físico instalado**: `PTZ.Limit.L{n}.MaxZoom`, `PTZ.Support.S{n}.AbsoluteZoom`, `PTZ.
+       Various.V{n}.ZoomEnabled` — "¿qué sabe hacer el subsistema PTZ en general?", no "¿qué lente
+       tiene montada esta cámara ahora?".
+       - Primer intento de explicación (**incorrecto, corregido**): se asumió que esta cámara
+         (`Brand.ProdShortName = AXIS M1135`) era de lente fijo sin zoom óptico. Falso — AXIS vende
+         una variante `M1135 Mk II i-CS` que **sí** trae un lente varifocal 3.5-10mm con zoom y
+         enfoque remotos motorizados de fábrica (confirmado contra la página de producto de AXIS).
+         El `.json` no tiene un campo que distinga qué variante/generación es esta unidad en
+         particular, así que no se puede descartar que sí tenga el lente motorizado.
+       - **Campo mejor encontrado al revisar con más cuidado**: `PTZ.ImageSource.I0.PTZEnabled =
+         false`. A diferencia de los campos anteriores (genéricos del driver), este sí es específico
+         de *esta instalación* — dice que el PTZ/zoom no está activo en el canal de video de esta
+         cámara en particular, sea cual sea el lente físico montado. Es el campo correcto para decidir
+         cámara por cámara si vale la pena consultar el zoom en vivo, sin tener que adivinar por el
+         modelo.
+       El valor **en vivo** (cuando `PTZEnabled=true`) no está en `param.cgi?action=list&group=root`
+       en absoluto. Se confirmó (vía documentación oficial de AXIS,
+       `developer.axis.com/vapix/network-video/pantiltzoom-api/`, no solo por memoria) que vendría de
+       `GET /axis-cgi/com/ptz.cgi?query=position`, que responde texto plano `pan=X tilt=Y zoom=Z
+       iris=... focus=... autofocus=on/off` (formato distinto al dotted `root.X.Y=Z` que
+       `dic_to_json()` ya procesa, necesitaría su propio parser). Esto confirma que el endpoint
+       existe y el formato esperado, pero **sigue sin probarse contra una cámara real con
+       `PTZEnabled=true`** — a diferencia del campo de HIKVISION, que sí se validó en vivo con la
+       cámara física. No inventar el nombre final del campo en `config_compare.py` hasta tener esa
+       prueba.
 
      **HIKVISION**
      - Imagen: `ImageChannel.{ImageFlip.enabled, IrcutFilter.*, Exposure.*, powerLineFrequency.*,
