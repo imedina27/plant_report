@@ -914,6 +914,38 @@ flowchart TD
      - ¿Qué reporta una cámara que ese día falló en el log (`Timed out`, sin `.jpg`)? Propuesta:
        registrarlo explícito como `SIN IMAGEN` en vez de omitirla en silencio.
 
+   ### 2.7 Semáforo de estados (decidido 03/10/2026)
+
+   Surgió de la pregunta "¿qué pasa cuando una cámara da `NO CONCLUYENTE`, me pregunta?" — la
+   respuesta honesta era "hoy no, solo se imprime" porque la ventana de revisión no existe todavía.
+   Eso llevó a notar que `REVISAR` (sospecha automática, sin veredicto humano todavía) y "se movió"
+   (confirmado por un humano) **no son el mismo estado**, aunque hasta ahora se hablaba de ellos
+   como si lo fueran. El semáforo de 4 colores deja esto explícito:
+
+   | Color | Estado | Qué significa | Quién lo pone |
+   | --- | --- | --- | --- |
+   | 🟢 Verde | `OK` | Igual a su base, todo bien | El sistema automático |
+   | 🟣 Morado | `REVISAR` | Sospecha automática (desplazamiento sobre el umbral, o ORB y fase no coinciden) — **sin veredicto humano todavía** | El sistema automático |
+   | 🔴 Rojo | Se movió (confirmado) | Un humano confirmó con "Mal" en la ventana de revisión — incidencia real, abierta hasta que se corrija físicamente | La ventana de revisión (sección 2.3) |
+   | 🟡 Ámbar | `NO CONCLUYENTE` | El sistema no pudo verificar la cámara ese día (poca luz, lente sucio/tapado, estructura insuficiente) — **no es una sospecha de movimiento, es falta de información** | El sistema automático |
+
+   Transiciones desde morado, al resolverse en la ventana de revisión:
+   - Clic **"Bien"** → vuelve a verde (falso positivo confirmado, no se movió).
+   - Clic **"Sustituir Base"** → vuelve a verde (sí se movió, pero se acepta como la nueva normalidad).
+   - Clic **"Mal"** → pasa a rojo (incidencia confirmada, queda abierta hasta que alguien la corrija
+     físicamente y la cámara vuelva a comparar en verde por sí sola).
+
+   Ámbar sigue su **propia regla de escalamiento, distinta a la de rojo/morado**: un `NO CONCLUYENTE`
+   aislado no amerita avisar a nadie (puede ser lluvia en el lente, un día nublado). Si la **misma
+   cámara** lo da varios días seguidos, sí amerita aviso — pero con un mensaje distinto
+   ("esta cámara lleva N días sin poder verificarse"), no el mismo de "¿se movió?" que usa morado/rojo.
+   Ninguno de los tres botones de la ventana de revisión calza bien para ámbar (no hay una sospecha
+   concreta que confirmar o rechazar), así que no debería pasar por esa ventana de la misma forma que
+   morado.
+
+   Útil tenerlo presente para Fase 5 (reporte ejecutivo): este mismo semáforo es un candidato natural
+   para la identidad visual del reporte — un vistazo por planta/cámara sin necesitar leer texto.
+
 3. **Actualización del log**
    Completar el log original con los resultados de la comparación (por cámara).
    - Decidido: se sobrescribe el `.log` original agregándole las líneas con el resultado de la
