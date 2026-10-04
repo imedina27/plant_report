@@ -52,6 +52,10 @@ def detect_brand(config: dict) -> str | None:
     if isinstance(firmware, str) and "VVTK" in firmware:
         return "VIVOTEK"
 
+    device_type = _get(config, "deviceType")
+    if isinstance(device_type, str) and device_type.startswith("DH"):
+        return "DAHUA"
+
     return None
 
 
@@ -378,10 +382,78 @@ def _vivotek_fields(config: dict) -> dict[str, list[str]]:
     return fields
 
 
+# ---------------------------------------------------------------------------
+# DAHUA — provisional (03/10/2026): curado contra el primer dump real
+# disponible, de una cámara ITC de tráfico/placas (no una domo/bullet genérica
+# del parque). Las secciones usadas aquí (Network, Encode, VideoColor,
+# VideoInOptions) son módulos genéricos de Dahua, no específicos de tráfico,
+# así que deberían generalizar -- pero falta confirmarlo contra una cámara
+# "normal" del parque antes de darlo por definitivo (ver ROADMAP.md, Fase 1).
+# ---------------------------------------------------------------------------
+
+_DAHUA_FIELDS = {
+    "imagen": [
+        "VideoColor[0][0].Brightness",
+        "VideoColor[0][0].Contrast",
+        "VideoColor[0][0].Gamma",
+        "VideoColor[0][0].Hue",
+        "VideoColor[0][0].Saturation",
+        "VideoInOptions[0].WhiteBalance",
+        "VideoInOptions[0].ExposureMode",
+        "VideoInOptions[0].GainAuto",
+        "VideoInOptions[0].IrisAuto",
+        "VideoInOptions[0].Mirror",
+        "VideoInOptions[0].Flip",
+        "VideoInOptions[0].Rotate90",
+        "VideoInOptions[0].WideDynamicRange",
+        "VideoInOptions[0].WideDynamicRangeMode",
+        # Zoom en vivo -- confirmado 03/10/2026 contra una cámara física real
+        # (ver ROADMAP.md, sección 2.8/Fase 1): Zoom pasó de 0.0 a 0.144 y
+        # volvió a 0.0 exacto al mover y regresar el zoom a mano. Igual que el
+        # absoluteZoom de HIKVISION, NO está en getConfig&name=All -- requiere
+        # que la descarga externa agregue
+        # devVideoInput.cgi?action=getFocusStatus&channel=0 y mezcle su
+        # resultado (claves "status.Focus"/"status.Zoom") en el .json. Sin ese
+        # cambio externo, el campo queda ausente y se ignora limpio.
+        "status.Zoom",
+    ],
+    "video": [
+        "Encode[0].MainFormat[0].Video.Width",
+        "Encode[0].MainFormat[0].Video.Height",
+        "Encode[0].MainFormat[0].Video.FPS",
+        "Encode[0].MainFormat[0].Video.GOP",
+        "Encode[0].MainFormat[0].Video.Compression",
+        "Encode[0].MainFormat[0].Video.Profile",
+        "Encode[0].MainFormat[0].Video.BitRateControl",
+    ],
+    "compresion": [
+        "Encode[0].MainFormat[0].Video.BitRate",
+        "Encode[0].MainFormat[0].Video.Quality",
+        "Encode[0].MainFormat[0].Video.QualityRange",
+    ],
+    "network": [
+        "Network.Hostname",
+        "Network.eth0.IPAddress",
+        "Network.eth0.SubnetMask",
+        "Network.eth0.DefaultGateway",
+        "Network.eth0.DnsServers[0]",
+        "Network.eth0.DnsServers[1]",
+        "Network.eth0.PhysicalAddress",
+        "Network.eth0.DhcpEnable",
+        "Network.eth0.MTU",
+    ],
+}
+
+
+def _dahua_fields(config: dict) -> dict[str, list[str]]:
+    return {category: list(paths) for category, paths in _DAHUA_FIELDS.items()}
+
+
 _FIELD_RESOLVERS = {
     "AXIS": _axis_fields,
     "HIKVISION": _hikvision_fields,
     "VIVOTEK": _vivotek_fields,
+    "DAHUA": _dahua_fields,
 }
 
 
