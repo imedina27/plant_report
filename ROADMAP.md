@@ -129,9 +129,18 @@ flowchart TD
      end contra los 144 `.json` de `Test/Check Plants` (144 detectados correctamente, 0 sin
      soportar), con `BASE CREADA` en la primera corrida y `OK` en la segunda (idempotente), y con
      un cambio simulado (IP de una cámara) correctamente detectado como `CAMBIO` con el campo,
-     valor base y valor actual exactos. DAHUA queda pendiente de su dump real, sin bloquear a las
-     otras 3 (agregar una marca es una función `_dahua_fields()` + huella de detección más, no
-     tocar el core).
+     valor base y valor actual exactos.
+   - **DAHUA agregado (03/10/2026), provisional** — `_dahua_fields()` + huella de detección
+     (`deviceType` empieza con `"DH"`) en `config_compare.py`, curados contra el dump real obtenido
+     de la cámara ITC de prueba (ver sección 2.8). Probado contra el fixture real
+     (`Test/DAHUA-ITC413-PW4D-Z3.json`): detección correcta, 0 diferencias comparado contra sí mismo,
+     y un cambio de IP simulado detectado con campo/valor base/valor actual exactos — mismo
+     comportamiento que las otras 3 marcas. Corrida de regresión completa contra las 210 cámaras del
+     sandbox: **0 "MARCA NO SOPORTADA"** (antes había 3 cámaras DAHUA reales en
+     `Pemex/TAD18DEMARZO/DEMOQUA` marcadas así), sin romper AXIS/HIKVISION. **Provisional** porque el
+     dump base es de una cámara ITC de tráfico, no una domo/bullet genérica — falta contrastar los
+     campos contra la cámara "normal" del parque cuando el usuario la tenga a la mano (posiblemente
+     martes 06/10/2026) antes de darlo por definitivo.
    - Decidido: los archivos se obtienen de la carpeta descrita arriba (`[CAMARA].json` por
      servidor/planta/día).
    - Decidido: la base de referencia **no existe todavía, hay que crearla** (ej. tomar el primer
@@ -285,20 +294,44 @@ flowchart TD
      - **Sin MAC disponible en este endpoint** — a diferencia de AXIS/HIKVISION, no encontré
        ningún campo de dirección MAC en todo el dump (`getparam.cgi` no lo expone aquí).
 
-     **DAHUA — pendiente, sin verificar.** Sigue sin haber ningún `.json` real de esta marca. Por
-     la API documentada hay indicios razonables de qué secciones existen (`Network`, `VideoColor`,
-     `Encode`), pero **no se puede garantizar el nombre exacto de cada campo** (mayúsculas,
-     índices, subclaves) sin un dump real — inventar esos nombres arriesga que la comparación
-     busque un campo que no existe y falle en silencio. **Cuando llegue el dump real (martes
-     06/10/2026), revisar también si trae algún campo de zoom en vivo**, igual que se hizo para
-     AXIS/HIKVISION/VIVOTEK el 03/10/2026 — no asumir que no aplica solo porque no se ha visto.
+     **DAHUA — primer dump real obtenido (03/10/2026), con una salvedad importante.** El usuario dio
+     acceso por túnel a una cámara DAHUA real (`DHI-ITC413-PW4D-Z3`, lente varifocal motorizada, POC)
+     y se corrió `getConfig&name=All` completo (310 secciones, guardado en
+     `Test/DAHUA-ITC413-PW4D-Z3.json`). Confirma que `Network`, `VideoColor[0][N]` y `Encode[0]`
+     existen tal como se especulaba, con nombres de campo reales — pero **es una cámara ITC de
+     tráfico/placas (ANPR), no una domo/bullet genérica** como las que monitorea el parque real (su
+     overlay dice literalmente "Sin licencia" y el dump trae cientos de secciones específicas de
+     tráfico — `TrafficGlobal`, `ParkingSpace*`, etc. — que no deberían copiarse a la lista curada).
+     Antes de fijar la lista final de campos, conviene contrastar contra el dump de una cámara DAHUA
+     "normal" del parque (ej. la prometida para el martes 06/10/2026) para confirmar que las secciones
+     genéricas (`Network`/`VideoColor`/`Encode`) se ven igual ahí. Sin cuentas de usuario/contraseñas
+     en el dump (todas enmascaradas `******`), igual que documentaba el código original.
+
+     **Zoom DAHUA — confirmado en vivo (03/10/2026), con evidencia real igual de sólida que
+     HIKVISION.** No está en `getConfig&name=All` (mismo punto ciego que AXIS), pero sí en un
+     endpoint separado y genérico (no específico de tráfico):
+     `GET /cgi-bin/devVideoInput.cgi?action=getFocusStatus&channel=0` → `status.Zoom` (0.0-1.0
+     normalizado). Verificado con un cambio de zoom real hecho a mano por el usuario desde la interfaz
+     web de la cámara: `Zoom` pasó de `0.000000` a `0.144090` al mover el zoom, y volvió exacto a
+     `0.000000` al regresarlo — confirmado también que `status.Focus` se mueve junto con el zoom
+     (0.1545→0.2909→0.1576, el mismo tipo de residuo pequeño ya visto en los reacomodos manuales de
+     la HIKVISION física) porque cambiar el zoom de un lente varifocal desenfoca y hay que reajustar,
+     igual que el Hallazgo 6 del Experimento 8. **Hallazgo aparte**: `status.ZoomMotorSteps` y
+     `status.FocusMotorSteps` NO cambiaron con el movimiento real (se quedaron fijos en 1159 y 330) —
+     parecen ser otra cosa (quizás un total de calibración), no la posición actual. El campo correcto
+     para vigilar es `status.Zoom`, no `status.ZoomMotorSteps`. No se encontró el endpoint para mover
+     el zoom por API (se probaron `devVideoInput.cgi?action=adjustZoomAndFocus/adjustZoomFocus` y
+     `ptz.cgi?action=start` con códigos `ZoomTele`/`Zoom1` — todos "Not Implemented"/"Bad Request" en
+     este modelo), pero no hace falta: para Fase 1 solo hace falta *leer* el campo, no escribirlo.
    - Preguntas abiertas:
-     - **Pendiente de entrega — martes (06/10/2026)**: el usuario va a estar en oficina y podrá dar
-       acceso a una cámara Dahua real para correr `DahuaCamConf()` (ya en `Test/cameras/dahua.py`) y
-       compartir el resultado crudo — igual que ya se hizo con AXIS, HIKVISION y VIVOTEK. Falta
-       también su huella de detección de marca (AXIS: `Brand.Brand == "AXIS"`; HIKVISION:
-       `DeviceInfo["@xmlns"]` conteniendo `hikvision.com`; VIVOTEK:
-       `system.info.firmwareversion` conteniendo `VVTK`).
+     - ~~Pendiente de entrega — acceso a una cámara Dahua real para correr `DahuaCamConf()` y su
+       huella de detección~~ — **resuelto (03/10/2026)**: el usuario dio acceso por túnel a una
+       cámara DAHUA real (POC, modelo ITC413 de tráfico) antes de la fecha prevista. Huella de
+       detección implementada: `deviceType` empieza con `"DH"` (AXIS: `Brand.Brand == "AXIS"`;
+       HIKVISION: `DeviceInfo["@xmlns"]` conteniendo `hikvision.com`; VIVOTEK:
+       `system.info.firmwareversion` conteniendo `VVTK`). **Sigue pendiente, posiblemente martes
+       (06/10/2026)**: contrastar los campos curados contra una cámara DAHUA "normal" del parque (no
+       ITC de tráfico), para confirmar que generalizan antes de darlos por definitivos.
      - **Zoom — decidido (03/10/2026): sí debe vigilarse en Fase 1.** Campo `PTZStatus.
        AbsoluteHigh.absoluteZoom` agregado a la categoría Imagen de HIKVISION en `config_compare.py`,
        probado contra los 144 `.json` reales del sandbox sin romper nada (el campo está ausente en
@@ -686,7 +719,7 @@ flowchart TD
    | --- | --- | --- |
    | **Bien** | El algoritmo se equivocó, la cámara no se movió | Falso positivo. Se registra y no se vuelve a preguntar lo mismo. |
    | **Mal** | Sí se movió, hay que ir a acomodarla físicamente | Queda como incidencia abierta y sigue alertando hasta resolverse. |
-   | **Sustituir Base** | Se movió, pero se decide dejarla así | La imagen actual reemplaza a la base. |
+   | **Base Desactualizada** | Se movió y se acepta como la nueva normalidad | **No** reemplaza la base de inmediato — ver sección 2.8, el reemplazo real se hace aparte con `ventana_bases.py`. |
 
    - **Por qué durante la ejecución y no en una cola aparte**: una cola que nadie revisa es peor que
      una pausa que obliga a decidir. Así el proceso termina completo, sin nada pendiente.
@@ -931,7 +964,8 @@ flowchart TD
 
    Transiciones desde morado, al resolverse en la ventana de revisión:
    - Clic **"Bien"** → vuelve a verde (falso positivo confirmado, no se movió).
-   - Clic **"Sustituir Base"** → vuelve a verde (sí se movió, pero se acepta como la nueva normalidad).
+   - Clic **"Base Desactualizada"** → pasa a un estado intermedio nuevo (ni verde ni rojo todavía,
+     ver sección 2.8) hasta que alguien suba una imagen limpia de reemplazo; ahí vuelve a verde.
    - Clic **"Mal"** → pasa a rojo (incidencia confirmada, queda abierta hasta que alguien la corrija
      físicamente y la cámara vuelva a comparar en verde por sí sola).
 
@@ -945,6 +979,85 @@ flowchart TD
 
    Útil tenerlo presente para Fase 5 (reporte ejecutivo): este mismo semáforo es un candidato natural
    para la identidad visual del reporte — un vistazo por planta/cámara sin necesitar leer texto.
+
+   ### 2.8 Reemplazo de bases: por qué no es un solo clic (decidido 03/10/2026)
+
+   El diseño original del botón "Sustituir Base" copiaba de inmediato la imagen que disparó el
+   `REVISAR` como nueva base. El usuario señaló el problema de uso diario: **la mayoría de las veces
+   que se revisa una cámara hay un camión o montacargas en cuadro** — si no lo hay, probablemente ni
+   hubiera disparado `REVISAR`. Copiar esa imagen tal cual hornearía el camión en la base, envenenando
+   todas las comparaciones futuras contra una referencia que nunca fue realmente "limpia".
+
+   **Rediseño**: el botón (renombrado **"Base Desactualizada"**) ya no copia nada. Solo dos cosas
+   cambian:
+   - `image_compare.py`: nuevo marcador `.desactualizada` junto al `.jpg` de la base
+     (`marcar_base_desactualizada()` / `base_desactualizada()` / `limpiar_marcador_desactualizada()`).
+     Mientras existe, `compare_camera_image()` regresa el estado nuevo `BASE DESACTUALIZADA` sin
+     correr la comparación geométrica — no tiene caso seguir preguntando "¿se movió?" sobre una base
+     que ya se sabe que está mal, eso solo generaría ruido diario repetido.
+   - **`ventana_bases.py` (implementado 03/10/2026)**: ventana aparte, independiente de la corrida
+     diaria, que lista las cámaras con marcador pendiente (hoy escaneando `IMAGE_BASE_ROOT`, listo
+     para apuntar a `perfil_camara` cuando exista la BD — mismo patrón que `umbral_para()`). Al elegir
+     una cámara se ve su base actual (la desactualizada); el botón "Seleccionar imagen..." abre el
+     explorador de archivos y **no guarda de inmediato** — muestra la imagen elegida al lado de la
+     base actual para confirmar que se abrió la correcta, y solo el botón **"Aceptar"** (separado,
+     aparece habilitado hasta elegir algo) ejecuta `save_base()` y limpia el marcador. Si no era la
+     imagen correcta, "Seleccionar imagen..." se puede volver a oprimir sin que nada se haya guardado
+     todavía (ajuste pedido 03/10/2026 tras la primera prueba). Al confirmar, una ventanita propia
+     avisa "la imagen base de la cámara [ruta] fue cambiada con éxito" — con el tema oscuro/claro de
+     la app, no el `messagebox` nativo de Tkinter (que no sigue el tema y siempre sale en modo claro).
+     Esto le da al operador libertad real: puede esperar a que el camión se vaya y tomar o elegir una
+     foto limpia cuando le convenga, sin depender de la imagen automática del día.
+
+   **`captura.py` (implementado 03/10/2026, movido a carpeta propia el mismo día)**: script de línea
+   de comandos aparte, sencillo a propósito, para tomar una foto directo de la cámara en el momento
+   exacto en que el operador la ve limpia (sin camión), en vez de depender de la imagen que trajo la
+   corrida automática de ese día:
+
+   ```text
+   python captura.py <ip> <usuario> <password> <marca>
+   ```
+
+   Vive en **`script/capture_img/`**, carpeta deliberadamente independiente del resto de
+   Plant_Report (sin depender de su Pipenv) — el usuario la copia completa a cada servidor donde
+   haga falta capturar. Incluye su propio `README.md` con las dependencias a instalar (`pip install
+   requests`, única dependencia externa). Guarda en `images/<ip>/<timestamp>.jpg`, **relativo a esa
+   misma carpeta** (no al directorio desde donde se invoque) — no decide por su cuenta cuál
+   cámara/base reemplaza; ese paso lo sigue haciendo `ventana_bases.py` (en el repo principal) con su
+   selector de archivo, eligiendo a mano el archivo que `captura.py` dejó en el servidor.
+
+   **Las dudas de endpoint/autenticación se resolvieron con código real**: el usuario ya tenía las 4
+   marcas resueltas en `Check_Cameras/conf/cameras/{axis,dahua,hikvision,vivotek}.py` (el programa
+   externo de revisión), probadas en producción — incluida DAHUA, confirmada en uso real pese a que su
+   *configuración* (Fase 1) sigue pendiente del dump. Se copiaron y adaptaron a un paquete
+   `script/capture_img/cameras/` (un archivo por marca + `capturar(ip, usuario, password) -> bytes`,
+   más un registro en `cameras/__init__.py` — agregar una marca nueva es un archivo + una línea, como
+   se pidió), quitando lo que no aplica a una captura manual de una sola cámara (proxy/túneles SSH,
+   sesión compartida entre cientos de cámaras, logging a archivo por servidor, códigos de error
+   numéricos) y conservando lo que sí importa — el endpoint exacto y el esquema de autenticación:
+
+   | Marca | Endpoint(s) de imagen | Auth |
+   | --- | --- | --- |
+   | HIKVISION | `/ISAPI/Streaming/channels/1/picture` | Digest |
+   | AXIS | `/axis-cgi/jpg/image.cgi?camera=1` | Digest |
+   | VIVOTEK | 5 candidatos en orden (`/cgi-bin/viewer/video.jpg`, `...?channel=0`, `/video.jpg`, `/cgi-bin/jpeg.cgi`, `/cgi-bin/viewer/snapshot.cgi`) | **Basic** (no digest) |
+   | DAHUA | 3 candidatos en orden (`/cgi-bin/snapshot.cgi?channel=1`, `...?chn=1`, `/cgi-bin/snapshot.cgi`) | Digest |
+
+   Decisiones tomadas al confirmar con el usuario (03/10/2026):
+   - **Sin soporte de proxy/túnel**: el script corre con acceso directo a la cámara, ejecutado en cada
+     servidor según se necesite — no a través de los túneles SSH que administra el programa externo de
+     revisión (a diferencia del escaneo masivo de producción, que sí los necesita).
+   - **Canal fijo por marca, no parametrizable**: se asume siempre el mismo canal que ya usa
+     producción (el más alto entre 0 y 1 según la convención de cada marca) — HIKVISION/VIVOTEK ya lo
+     traían fijo en la URL en el código original, AXIS/DAHUA fijos a `1` aquí.
+   - **Password por línea de comandos**: queda visible en el historial de la terminal. Aceptable para
+     esta herramienta interna de un solo operador (se pidió explícitamente así).
+   - **`requests` como única dependencia externa, pero fuera del Pipfile principal**: se eligió sobre
+     reescribir con `urllib` de la librería estándar para replicar fielmente la autenticación
+     Digest/Basic y los reintentos entre URLs candidatas ya probados en producción. Como
+     `script/capture_img/` es una carpeta independiente pensada para copiarse a servidores sueltos (no
+     para correr dentro del entorno Pipenv de Plant_Report), `requests` se documenta e instala aparte
+     (`pip install requests`, ver su `README.md`) en vez de agregarse al Pipfile principal.
 
 3. **Actualización del log**
    Completar el log original con los resultados de la comparación (por cámara).
@@ -1042,17 +1155,49 @@ flowchart TD
      - ¿Qué pasa si el envío falla (reintentos, aviso a alguien, quedar registrado en el log)?
      - ¿Va en copia alguien fijo (ej. Gerencia general, el equipo de Quantum Labs)?
 
+## Observaciones por cámara (pedido 03/10/2026)
+
+Las cámaras deberían tener un **espacio de observaciones** — notas de contexto humano (ej. "cámara
+descompuesta, esperando repuesto", "se reorientó a propósito por una remodelación", "el camión de
+este patio es permanente, no es un falso positivo") que luego aparezcan en el reporte ejecutivo
+(Fase 5). La diferencia con el semáforo de estados (sección 2.7) es que esto no es un veredicto
+automático ni el resultado de una comparación — es contexto libre que alguien agrega a mano para
+explicar algo que los números solos no cuentan.
+
+- Decidido: la observación vive ligada a la **cámara**, no a una corrida/día puntual — tiene que
+  sobrevivir entre corridas para que el reporte la recoja cuando corresponda.
+- Decidido: el lugar lógico para guardarla es la **base de datos** (Fase 4), no un archivo aparte —
+  mismo razonamiento que `perfil_camara`: necesita sobrevivir, ser consultable por cámara, y
+  alimentar Fase 5 sin depender de que exista un archivo específico ese día.
+- Preguntas abiertas, sin resolver todavía:
+  - **¿Dónde se capturan?** ¿Desde `ventana_revision.py` (al momento de revisar una cámara dudosa),
+    desde una ventana aparte (al estilo `ventana_bases.py`, para poder anotar cualquier cámara en
+    cualquier momento, no solo las que salieron `REVISAR`), o ambas?
+  - **¿Dónde se almacenan exactamente?** Confirmado que es la base de datos, pero falta el diseño:
+    ¿una tabla `observacion_camara` separada de `historial_comparacion`/`perfil_camara` (sección
+    2.3/Fase 4), con qué campos (texto, fecha, quién la escribió)?
+  - **¿Cómo se actualizan y borran?** ¿Es una nota viva por cámara que se sobrescribe, o un historial
+    de notas con fecha (como un log de bitácora)? ¿Cualquiera puede borrar una observación, o debe
+    quedar registro de que existió (para no perder contexto de por qué algo se ignoró en su momento)?
+
 ## Preguntas generales de ejecución
 
-- Decidido: por ahora la ejecución es manual (vía CLI). La automatización (tarea programada de
-  Windows, servicio, etc.) para que el reporte diario salga solo se define más adelante.
-- ¿Dónde corre (equipo local, servidor)?
-- ¿Necesita interfaz gráfica o es suficiente con línea de comandos?
+- Decidido (03/10/2026): **corre en la máquina local del usuario** (la misma donde se está
+  desarrollando), no en un servidor aparte.
+- Decidido (03/10/2026): **se dispara manualmente**, después de que el programa externo de revisión
+  ya haya descargado los datos de los servidores (offline) ese día. La automatización completa del
+  pipeline (tarea programada, servicio, para que todo corra solo de principio a fin) queda pendiente
+  para más adelante — no es parte del alcance actual.
+- Resuelto en la práctica, no por decisión explícita: es un **híbrido**. La corrida en sí es CLI
+  (`main.py`), pero los pasos que requieren juicio humano ya tienen su propia ventana —
+  `ventana_revision.py` (revisar cámaras dudosas) y `ventana_bases.py` (reemplazar bases
+  desactualizadas) — en vez de resolverse por línea de comandos.
 
 ## Estado
 
-- [x] Fase 1 implementada para AXIS/HIKVISION/VIVOTEK (comparación de JSON de configuración) — falta
-      DAHUA (pendiente de entrega el martes 06/10/2026)
+- [x] Fase 1 implementada para AXIS/HIKVISION/VIVOTEK/DAHUA (comparación de JSON de configuración) —
+      DAHUA agregado 03/10/2026 contra un dump real (cámara ITC de prueba), **provisional** hasta
+      contrastarlo con una cámara "normal" del parque (posiblemente martes 06/10/2026)
 - [x] Fase 1: zoom — pedido explícitamente (03/10/2026) que se vigile en **todas** las marcas, no
       solo HIKVISION. Estado real por marca tras revisar dumps reales:
       - HIKVISION: campo agregado (`PTZStatus.AbsoluteHigh.absoluteZoom`), verificado en vivo con la
@@ -1061,9 +1206,14 @@ flowchart TD
       - VIVOTEK: campo agregado (`videoin.c0.zoomratiodisplay`), visto en dump real pero sin
         verificar con un zoom real (la cámara de muestra no es motorizada)
       - AXIS: **no se pudo agregar** — el dump real solo trae capacidades estáticas (¿puede hacer
-        zoom?), no el valor en vivo; ese dato ni siquiera está en la descarga actual. Mismo nivel de
-        incertidumbre que DAHUA, pendiente de una cámara AXIS motorizada real para probarlo
-      - DAHUA: pendiente del dump del martes — cuando llegue, revisar también si trae zoom
+        zoom?), no el valor en vivo; ese dato ni siquiera está en la descarga actual. Pendiente de una
+        cámara AXIS motorizada real para probarlo
+      - DAHUA: campo encontrado y **verificado en vivo con cámara real** (03/10/2026) —
+        `devVideoInput.cgi?action=getFocusStatus&channel=0` → `status.Zoom`, confirmado con un cambio
+        de zoom real hecho a mano (0.0 → 0.144 → 0.0 exacto al regresarlo). Mismo nivel de evidencia
+        que HIKVISION. Falta todavía: confirmar que la sección curada de Fase 1 (`Network`/
+        `VideoColor`/`Encode`) se ve igual en una cámara DAHUA "normal" del parque, no solo en la ITC
+        de prueba (ver detalle en la sección de Fase 1 arriba)
 - [x] Fase 2: base de imágenes curada (91 de 143 cámaras; el resto se creará sola)
 - [x] Fase 2: diseño de dos señales + guarda de inliers validado en principio (features+homografía
       como señal principal, diff de píxeles como secundaria) — **umbrales a recalcular** (ver abajo)
@@ -1120,12 +1270,30 @@ flowchart TD
       `umbral_para()` (hoy regresa el global, listo para engancharse a `perfil_camara` sin tocar el
       resto del módulo cuando exista Fase 4). Variable de entorno nueva: `IMAGE_BASE_ROOT`.
       Dependencias nuevas en el Pipfile principal: `opencv-python`, `numpy`.
+- [x] Fase 2: ventana de revisión conectada al flujo real (`main.py`), con bandera
+      `--sin-interaccion`; botón "Base Desactualizada" marca la base en vez de sustituirla de
+      inmediato (ver sección 2.8 — evita hornear un camión en la base)
+- [x] Fase 2: `ventana_bases.py` (03/10/2026) — ventana aparte para reemplazar bases marcadas como
+      desactualizadas, eligiendo una imagen limpia desde el explorador de archivos cuando convenga,
+      sin depender de la corrida diaria
+- [x] Fase 2: `captura.py` (03/10/2026) — en `script/capture_img/` (carpeta independiente, con su
+      propio `README.md`, para copiarse a cada servidor sin el Pipenv de Plant_Report). CLI
+      `python captura.py <ip> <usuario> <password> <marca>`, guarda en `images/<ip>/<timestamp>.jpg`.
+      Las 4 marcas (AXIS/DAHUA/HIKVISION/VIVOTEK) adaptadas de las rutinas ya probadas en producción
+      en `Check_Cameras/conf/cameras/`, separadas en un paquete `cameras/` para agregar marcas nuevas
+      sin tocar las demás (ver sección 2.8). Única dependencia: `requests` (`pip install requests`,
+      no entra al Pipfile principal).
+- [x] Fase 2: **primera prueba real contra DAHUA (03/10/2026)** — dos capturas de la misma cámara
+      POC (`devVideoInput`/túnel) con 90s de diferencia, corridas por `image_compare.py` sin ninguna
+      base curada previa. Resultado: `OK` limpio, con números muy por encima de los umbrales
+      (3100 inliers ORB, confianza de fase 0.857, desplazamiento 0.27/0.18 px) — la escena tiene
+      mucha textura real (pared, imagen religiosa, macetas). Primera confirmación de que el pipeline
+      de Fase 2 funciona igual de bien contra una marca distinta a HIKVISION.
 - [ ] Fase 2: recalibrar el umbral de confianza de fase (0.15, pendiente desde el Experimento 9) y
       el umbral de movimiento (0.25%) con más datos reales de producción
 - [ ] Coordinar con quien mantenga el programa externo de revisión para agregar
       `PTZCtrl/channels/1/status` a la descarga de HIKVISION (bloqueante para que el zoom de Fase 1
       sirva de algo en la práctica)
-- [ ] Ventana de revisión implementada (el módulo ya genera el estado `REVISAR` que la alimentaría)
 - [ ] Fase 3 definida (actualización del log)
 - [ ] Fase 4 definida (persistencia en base de datos)
 - [ ] Fase 5 definida (reporte ejecutivo)
