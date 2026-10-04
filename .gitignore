@@ -5,3 +5,4 @@ venv/
 .env
 .vscode/
 /Test/
+/script/capture_img/images/
