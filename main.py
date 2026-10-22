@@ -84,9 +84,15 @@ def main() -> None:
         help="Procesa solo este cliente (nombre exacto de la carpeta bajo CHECK_PLANTS_ROOT, "
         "ej. AbInBev). Si se omite, procesa todos los clientes encontrados esa fecha.",
     )
+    parser.add_argument(
+        "--fecha",
+        help="Fecha a procesar (formato ddmmyy, ej. 220926, o 'h' para hoy). Si se omite, se "
+        "pregunta en la terminal -- para correr sin nadie presente (ej. tarea programada), "
+        "combínalo con --sin-interaccion y da esta bandera también, si no, se queda esperando.",
+    )
     args = parser.parse_args()
 
-    raw = input("Fecha a procesar (formato ddmmyy, ej. 220926, o 'h' para hoy): ").strip()
+    raw = args.fecha if args.fecha else input("Fecha a procesar (formato ddmmyy, ej. 220926, o 'h' para hoy): ").strip()
     date_str = date.today().strftime("%d%m%y") if raw.lower() == "h" else raw
     fecha = datetime.strptime(date_str, "%d%m%y").date()
 
@@ -172,7 +178,7 @@ def main() -> None:
     rutas_generadas: dict[str, Path] = {}
     if generar:
         print("Generando reportes ejecutivos...")
-        rutas_generadas = generar_reportes_del_dia(conn, fecha)
+        rutas_generadas = generar_reportes_del_dia(conn, fecha, args.cliente)
         for cliente, ruta in rutas_generadas.items():
             print(f"  - {cliente}: {ruta}")
     else:

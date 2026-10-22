@@ -1405,7 +1405,20 @@ explicar algo que los números solos no cuentan.
   cliente para probar o revisar sin tocar a los demás. `main.py --cliente AbInBev` filtra desde el
   recorrido de archivos (nombre exacto de la carpeta de cliente) -- sin la bandera, procesa todos
   los clientes encontrados esa fecha, igual que antes. `main.py --help` documenta todas las
-  banderas (`--sin-interaccion`, `--cliente`).
+  banderas (`--sin-interaccion`, `--cliente`, `--fecha`).
+  - **Bug real encontrado y corregido el mismo día**: `--cliente` solo filtraba qué cámaras se
+    comparaban -- el paso de generar/enviar el reporte (`generar_reportes_del_dia()`) seguía
+    consultando "qué clientes tienen datos hoy" en la base de datos sin filtrar. Si ya había otro
+    cliente persistido ese mismo día (de una corrida anterior), `--cliente AbInBev` terminaba
+    generando **y enviando por correo** el reporte de ese otro cliente también, sin haberlo pedido
+    -- pasó de verdad, reenvió un correo real de `Api_Manzanillo`. Corregido: `cliente` ahora se
+    pasa hasta `generar_reportes_del_dia()`, acotando todo el proceso (comparación, reporte y
+    correo), no solo la comparación.
+- **Decidido (21/10/2026) — bandera `--fecha`**: `main.py` siempre preguntaba la fecha por
+  `input()`, sin importar `--sin-interaccion` -- una corrida verdaderamente desatendida (ej. tarea
+  programada, sin nadie frente a la terminal) se quedaría esperando esa respuesta para siempre.
+  `main.py --fecha h` (o una fecha exacta `ddmmyy`) evita la pregunta; si se omite, sigue
+  preguntando en la terminal como antes.
 - **Fuera de alcance (anotado 21/10/2026)**: habrá un **programa de administración aparte**
   (desarrollo nuevo, no este repo) para editar cámaras, cerrar/editar observaciones, y otras
   funciones todavía sin definir. Cualquier pendiente de este proyecto que solo tenga sentido
