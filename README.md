@@ -74,14 +74,14 @@ Al terminar, pregunta si generar el reporte ejecutivo y si enviarlo por correo.
 
 | Bandera | Para qué sirve |
 | --- | --- |
-| `--sin-interaccion` | No abre la ventana de revisión (los `REVISAR` quedan sin resolver, pendientes para otro día); genera y envía el reporte automáticamente, sin preguntar. |
-| `--cliente NOMBRE` | Procesa, reporta y envía correo solo de ese cliente (nombre exacto de su carpeta bajo `CHECK_PLANTS_ROOT`). Sin esto, corre todos los clientes encontrados esa fecha. |
-| `--fecha FECHA` | Fecha a procesar (`ddmmyy` o `h`), sin preguntar en la terminal. Necesaria junto con `--sin-interaccion` para una corrida verdaderamente desatendida (ej. tarea programada) — sin ella, igual se queda esperando la fecha. |
+| `--no-interaction` | No abre la ventana de revisión (los `REVISAR` quedan sin resolver, pendientes para otro día); genera y envía el reporte automáticamente, sin preguntar. |
+| `--client NOMBRE` | Procesa, reporta y envía correo solo de ese cliente (nombre exacto de su carpeta bajo `CHECK_PLANTS_ROOT`). Sin esto, corre todos los clientes encontrados esa fecha. |
+| `--date FECHA` | Fecha a procesar (`ddmmyy` o `h`), sin preguntar en la terminal. Necesaria junto con `--no-interaction` para una corrida verdaderamente desatendida (ej. tarea programada) — sin ella, igual se queda esperando la fecha. |
 
 Ejemplo para una corrida automática sin nadie presente:
 
 ```powershell
-pipenv run python main.py --sin-interaccion --fecha h
+pipenv run python main.py --no-interaction --date h
 ```
 
 ## Ventanas

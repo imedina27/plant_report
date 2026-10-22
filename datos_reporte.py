@@ -169,8 +169,8 @@ def generar_reportes_del_dia(conn, fecha: date, cliente: str | None = None) -> d
     es lo que `correo.py` necesita para saber qué adjuntarle a quién.
 
     `cliente`, si se da, acota TODO el proceso a ese cliente -- no solo qué cámaras se compararon en
-    `main.py` (`--cliente`), también qué se reporta y a quién se le envía correo. Sin esto, un `main.py
-    --cliente AbInBev` corrido el mismo día que ya hay otro cliente en la base de datos (de una
+    `main.py` (`--client`), también qué se reporta y a quién se le envía correo. Sin esto, un `main.py
+    --client AbInBev` corrido el mismo día que ya hay otro cliente en la base de datos (de una
     corrida anterior ese día) terminaba generando -- y enviando -- el reporte de ese otro cliente
     también, porque esta función consultaba "qué clientes tienen datos hoy" sin filtrar (bug real,
     detectado 21/10/2026: reenvió un correo de Api_Manzanillo sin haberlo pedido)."""

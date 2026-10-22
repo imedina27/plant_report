@@ -1653,3 +1653,8 @@ explicar algo que los números solos no cuentan.
       completo, así que terminaba 12pt más ancha que el espacio real disponible. Se le puso
       `LEFTPADDING`/`RIGHTPADDING` en 0 a esa celda en vez de reservarle espacio. Verificado
       regenerando el PDF real del 22/10/2026 (cámara `PV-OC03`, confirmada movida ese día).
+- [x] **Banderas de `main.py` renombradas al inglés (22/10/2026)**: pedido explícito del usuario --
+      sus demás programas usan nombres de bandera en inglés (`--client`, no `--cliente`), aunque el
+      resto de los mensajes/comentarios del proyecto se quedan en español. `--sin-interaccion` →
+      `--no-interaction`, `--cliente` → `--client`, `--fecha` → `--date`. Actualizado también en
+      `plant_report.ps1` (vive en `Documents/`, fuera de este repo) y en `README.md`.

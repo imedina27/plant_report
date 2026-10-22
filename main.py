@@ -24,7 +24,7 @@ def _camaras_del_dia(
 
     `cliente`, si se da, acota el recorrido a esa carpeta de cliente únicamente (nombre exacto, tal
     cual aparece en `CHECK_PLANTS_ROOT`) -- evita recorrer el resto del árbol cuando solo interesa
-    uno (ver `--cliente` en `main.py`).
+    uno (ver `--client` en `main.py`).
 
     Regresa `(camaras, logs_por_servidor)`, donde `logs_por_servidor[(cliente, planta, servidor)]`
     es el resultado de `parsear_log_servidor()` para ese servidor (ya parseado una sola vez).
@@ -75,38 +75,38 @@ def main() -> None:
         "el reporte ejecutivo del día (ROADMAP.md).",
     )
     parser.add_argument(
-        "--sin-interaccion", action="store_true",
+        "--no-interaction", action="store_true",
         help="No abre la ventana de revisión; los REVISAR quedan solo en el log, sin bloquear. "
         "El reporte ejecutivo y el envío de correo se disparan automáticamente, sin preguntar.",
     )
     parser.add_argument(
-        "--cliente",
+        "--client",
         help="Procesa solo este cliente (nombre exacto de la carpeta bajo CHECK_PLANTS_ROOT, "
         "ej. AbInBev). Si se omite, procesa todos los clientes encontrados esa fecha.",
     )
     parser.add_argument(
-        "--fecha",
+        "--date",
         help="Fecha a procesar (formato ddmmyy, ej. 220926, o 'h' para hoy). Si se omite, se "
         "pregunta en la terminal -- para correr sin nadie presente (ej. tarea programada), "
-        "combínalo con --sin-interaccion y da esta bandera también, si no, se queda esperando.",
+        "combínalo con --no-interaction y da esta bandera también, si no, se queda esperando.",
     )
     args = parser.parse_args()
 
-    raw = args.fecha if args.fecha else input("Fecha a procesar (formato ddmmyy, ej. 220926, o 'h' para hoy): ").strip()
+    raw = args.date if args.date else input("Fecha a procesar (formato ddmmyy, ej. 220926, o 'h' para hoy): ").strip()
     date_str = date.today().strftime("%d%m%y") if raw.lower() == "h" else raw
     fecha = datetime.strptime(date_str, "%d%m%y").date()
 
-    camaras, logs_por_servidor = _camaras_del_dia(date_str, args.cliente)
+    camaras, logs_por_servidor = _camaras_del_dia(date_str, args.client)
     if not camaras:
-        donde = CHECK_PLANTS_ROOT / args.cliente if args.cliente else CHECK_PLANTS_ROOT
+        donde = CHECK_PLANTS_ROOT / args.client if args.client else CHECK_PLANTS_ROOT
         print(f"No se encontraron archivos .json/.jpg para la fecha {date_str} en {donde}")
         return
 
     print(f"Encontradas {len(camaras)} cámara(s) para la fecha {date_str}.")
 
     total = len(camaras)
-    ventana = None if args.sin_interaccion else VentanaRevision()
-    modo = "sin_interaccion" if args.sin_interaccion else "interactivo"
+    ventana = None if args.no_interaction else VentanaRevision()
+    modo = "sin_interaccion" if args.no_interaction else "interactivo"
     conn = db.get_connection()
 
     for i, (cliente, planta, servidor, camara, json_path, jpg_path) in enumerate(camaras, start=1):
@@ -180,20 +180,20 @@ def main() -> None:
         time.sleep(1.0)
         ventana.cerrar()
 
-    generar = args.sin_interaccion or input(
+    generar = args.no_interaction or input(
         "¿Generar el reporte ejecutivo de esta corrida? (s/n): "
     ).strip().lower().startswith("s")
     rutas_generadas: dict[str, Path] = {}
     if generar:
         print("Generando reportes ejecutivos...")
-        rutas_generadas = generar_reportes_del_dia(conn, fecha, args.cliente)
+        rutas_generadas = generar_reportes_del_dia(conn, fecha, args.client)
         for cliente, ruta in rutas_generadas.items():
             print(f"  - {cliente}: {ruta}")
     else:
         print("Reportes ejecutivos omitidos por el usuario.")
 
     if rutas_generadas:
-        enviar = args.sin_interaccion or input(
+        enviar = args.no_interaction or input(
             "¿Enviar los reportes por correo? (s/n): "
         ).strip().lower().startswith("s")
         if enviar:
