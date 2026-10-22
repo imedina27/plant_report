@@ -8,6 +8,9 @@ python-dotenv = "*"
 opencv-python = "*"
 numpy = "*"
 pillow = "*"
+psycopg2-binary = "*"
+reportlab = "*"
+requests = "*"
 
 [dev-packages]
 

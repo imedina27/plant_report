@@ -36,6 +36,13 @@ Con datos de ejemplo (18/09/2026): 2 clientes, 10 plantas, 11 servidores, 399 im
 > Corrección (02/10/2026): sí existe histórico — ver más abajo. Además, al 01/10/2026 el nivel de
 > cliente creció a 4: `AbInBev`, `Api_Manzanillo`, `C5i_Colima`, `Pemex` (antes solo se habían visto
 > `AbInBev`/`Others`).
+>
+> Aclarado (21/10/2026), al correr `backfill_reportes.py` contra octubre real y no encontrar datos
+> de `Pemex`/`C5i_Colima` en la mayoría de los días: **`Pemex` era una prueba de concepto que ya
+> terminó** -- no va a haber más imágenes de ese cliente. **`C5i_Colima` tiene más de 1000 cámaras**
+> y se decidió, por ahora, no correr el programa contra ese cliente (sin fecha definida para
+> empezar). Ningún código asume que ambos clientes estén activos; que no aparezcan en una corrida es
+> esperado, no una falla.
 
 Para desarrollo/pruebas hay un mirror local de esta misma estructura en `Test/Check Plants/`
 dentro del repo (con datos reales pero desconectado de producción), que el usuario va subiendo
@@ -107,15 +114,14 @@ flowchart TD
     B --> C["Fase 1: Comparar el .json de la camara<br/>contra su configuracion base<br/>-segun marca: AXIS, HIKVISION, DAHUA, VIVOTEK, etc-"]
     B --> D["Fase 2: Comparar la imagen de la camara<br/>contra su imagen base"]
 
-    C --> E["Fase 3: Agregar resultado de ambas<br/>comparaciones al log de esa camara"]
+    C --> E["Fase 3: Persistir resultado de ambas<br/>comparaciones en PostgreSQL<br/>-camara por camara, incluyendo veredicto humano-"]
     D --> E
 
     E --> F{"Se procesaron todas<br/>las camaras del dia?"}
     F -->|No| B
-    F -->|Si| G["Fase 4: Persistir resultados en PostgreSQL"]
+    F -->|Si| H["Fase 4: Generar reporte ejecutivo<br/>PDF diario, por planta"]
 
-    G --> H["Fase 5: Generar reporte ejecutivo<br/>PDF diario, por planta"]
-    H --> I["Fase 6: Enviar por correo el PDF<br/>a los destinatarios designados"]
+    H --> I["Fase 5: Enviar por correo el PDF<br/>a los destinatarios designados"]
 ```
 
 ## Flujo de alto nivel
@@ -883,12 +889,12 @@ flowchart TD
 
    La simulación giraba la imagen en 2D sin paralaje; en la realidad, con objetos cercanos (1-3 m,
    como esta cocina), el mismo giro físico produce un corrimiento de píxeles mucho mayor. Esto
-   **no invalida el método** — refuerza con evidencia directa la Decisión de Fase 4 (perfil
+   **no invalida el método** — refuerza con evidencia directa la Decisión de Fase 3 (perfil
    estadístico por cámara, no un umbral único): una cámara mirando de cerca necesita mucho más
    margen en píxeles que una cámara de patio mirando a 20 metros, para el mismo grado real de
    movimiento. El umbral de 0.25-0.5% del ancho puede ser demasiado sensible para cámaras de interior
    cercanas y demasiado laxo para escenas muy lejanas — es exactamente el tipo de calibración que el
-   perfil por cámara (Fase 4) está diseñado para resolver.
+   perfil por cámara (Fase 3) está diseñado para resolver.
 
    **Hallazgo 6 — de paso, se documentó el control de zoom por API** (útil si se decide cerrar el
    punto ciego del Hallazgo 4): `PTZCtrl/channels/1/status` reporta `absoluteZoom` (valor absoluto,
@@ -934,7 +940,7 @@ flowchart TD
    un número confiable, ahora sigue bien o pasa honestamente a `NO_CONCLUYENTE`), pero la fracción
    real de cámaras "fácilmente medibles por ORB" es menor de lo que se reportó en 2.1 — habrá que
    apoyarse más de lo esperado en correlación de fase (Experimento 6) y en el perfil por cámara
-   (Fase 4) para las cámaras que queden en esa zona gris.
+   (Fase 3) para las cámaras que queden en esa zona gris.
    - **Pendiente**: el umbral de confianza de fase (0.15) sigue viéndose como un corte algo
      arbitrario — varios casos quedan muy cerca por abajo (0.06–0.12) o por arriba (0.17–0.29).
      Vale la pena recalibrarlo con una muestra más grande antes de fijarlo en el módulo final.
@@ -969,6 +975,19 @@ flowchart TD
    - Clic **"Mal"** → pasa a rojo (incidencia confirmada, queda abierta hasta que alguien la corrija
      físicamente y la cámara vuelva a comparar en verde por sí sola).
 
+   **Decidido (21/10/2026) — qué pasa mientras una cámara está en rojo**: no preguntado explícitamente
+   hasta ahora. Una cámara roja casi siempre va a seguir dando `REVISAR` automático cada día mientras
+   siga físicamente movida (compara contra la misma base de siempre), así que la regla es:
+   - **Morado** (sospecha sin veredicto humano todavía): sigue abriendo la ventana de revisión en cada
+     corrida interactiva hasta que alguien la resuelva — es información nueva pendiente de juicio.
+   - **Rojo** (ya confirmada por un humano): **no vuelve a abrir la ventana**. Cada día que la
+     comparación automática siga dando `REVISAR` por la misma incidencia ya conocida, el sistema solo
+     anota el resultado en `historial_comparacion` (es ruido repetido preguntar lo mismo otra vez,
+     igual que con `BASE DESACTUALIZADA` en la sección 2.8). Vuelve sola a verde el día que la
+     comparación dé `OK` (cámara corregida físicamente) — sin que nadie tenga que confirmarlo a mano.
+   - Esto implica que `main.py` necesita consultar `perfil_camara.estado_actual` **antes** de decidir
+     si abre `ventana_revision` para una cámara en `REVISAR`, no solo mirar el resultado del día.
+
    Ámbar sigue su **propia regla de escalamiento, distinta a la de rojo/morado**: un `NO CONCLUYENTE`
    aislado no amerita avisar a nadie (puede ser lluvia en el lente, un día nublado). Si la **misma
    cámara** lo da varios días seguidos, sí amerita aviso — pero con un mensaje distinto
@@ -977,7 +996,7 @@ flowchart TD
    concreta que confirmar o rechazar), así que no debería pasar por esa ventana de la misma forma que
    morado.
 
-   Útil tenerlo presente para Fase 5 (reporte ejecutivo): este mismo semáforo es un candidato natural
+   Útil tenerlo presente para Fase 4 (reporte ejecutivo): este mismo semáforo es un candidato natural
    para la identidad visual del reporte — un vistazo por planta/cámara sin necesitar leer texto.
 
    ### 2.8 Reemplazo de bases: por qué no es un solo clic (decidido 03/10/2026)
@@ -995,9 +1014,17 @@ flowchart TD
      Mientras existe, `compare_camera_image()` regresa el estado nuevo `BASE DESACTUALIZADA` sin
      correr la comparación geométrica — no tiene caso seguir preguntando "¿se movió?" sobre una base
      que ya se sabe que está mal, eso solo generaría ruido diario repetido.
+     - **Decidido (21/10/2026) — este marcador migra a la base de datos**: en vez del archivo
+       `.desactualizada` junto al `.jpg`, el estado vive en `perfil_camara.estado_actual = 'base_desactualizada'`
+       (ver sección 3, diseño de tablas). `marcar_base_desactualizada()`/`base_desactualizada()`/
+       `limpiar_marcador_desactualizada()` pasan de tocar archivos a leer/escribir esa columna — el
+       comportamiento de `compare_camera_image()` no cambia, solo de dónde lee el dato. Pendiente de
+       implementar junto con el resto de la Fase 3 (hoy sigue en archivo hasta que exista el módulo
+       de BD).
    - **`ventana_bases.py` (implementado 03/10/2026)**: ventana aparte, independiente de la corrida
-     diaria, que lista las cámaras con marcador pendiente (hoy escaneando `IMAGE_BASE_ROOT`, listo
-     para apuntar a `perfil_camara` cuando exista la BD — mismo patrón que `umbral_para()`). Al elegir
+     diaria, que lista las cámaras con marcador pendiente (hoy escaneando `IMAGE_BASE_ROOT`; pasa a
+     consultar `perfil_camara WHERE estado_actual = 'base_desactualizada'` cuando exista la BD — mismo
+     cambio que `umbral_para()`). Al elegir
      una cámara se ve su base actual (la desactualizada); el botón "Seleccionar imagen..." abre el
      explorador de archivos y **no guarda de inmediato** — muestra la imagen elegida al lado de la
      base actual para confirmar que se abrió la correcta, y solo el botón **"Aceptar"** (separado,
@@ -1059,20 +1086,38 @@ flowchart TD
      para correr dentro del entorno Pipenv de Plant_Report), `requests` se documenta e instala aparte
      (`pip install requests`, ver su `README.md`) en vez de agregarse al Pipfile principal.
 
-3. **Actualización del log**
-   Completar el log original con los resultados de la comparación (por cámara).
-   - Decidido: se sobrescribe el `.log` original agregándole las líneas con el resultado de la
-     comparación (no se genera un archivo aparte).
-   - Preguntas abiertas:
-     - ¿Qué campos/formato exacto se deben agregar (ej. `[HH:MM:SS] INFO <CAMARA>: Comparación
-       con base OK/MOVIDA [score]`, siguiendo el mismo estilo del log actual)? ¿Aplica igual para
-       el resultado de la comparación de imagen y el de configuración (Fases 1 y 2)?
-     - ¿Qué pasa si el programa se corre más de una vez sobre el mismo log (evitar duplicar
-       líneas de resultado)?
-
-4. **Persistencia en base de datos**
-   Guardar los resultados (logs + comparaciones) en una base de datos.
+3. **Persistencia en base de datos**
+   Guardar los resultados de las comparaciones directo en la base de datos.
    - Decidido: PostgreSQL, ya hay un servidor disponible.
+   - **Decidido (21/10/2026) — se elimina el paso intermedio de "actualización del log"**: no se
+     reescribe el `.log` original ni se genera un archivo nuevo (jsonl u otro) con el resultado del
+     día. El programa lee directo el `.log`/`.json`/`.jpg` que ya deja el programa externo de
+     revisión, corre las comparaciones de Fase 1/2, y escribe el resultado directo a Postgres.
+     - Razonamiento: un archivo intermedio solo protegería contra perder el resultado si la
+       escritura a la BD falla — pero el resultado de Fase 1/2 siempre se puede volver a calcular
+       desde los archivos originales en disco (son deterministas), así que no hay nada que proteger
+       ahí. La única parte que **no** es recalculable es el veredicto humano de la ventana de
+       revisión (sección 2.3): si el usuario ya le dio clic a 20 cámaras `REVISAR` y la conexión a
+       la BD falla, perder eso sí le cuesta trabajo real repetirlo.
+     - **Decidido, por lo anterior**: la escritura a la BD se hace **cámara por cámara, justo
+       después de resolver cada una** (incluyendo el veredicto humano si lo hubo), no en lote al
+       final de la corrida completa. Así un fallo de conexión a media corrida solo pierde la cámara
+       en curso, no las ya procesadas.
+     - **Decidido, heredado del mismo razonamiento**: si el programa se vuelve a correr el mismo día
+       para la misma cámara, se trata como upsert sobre la fila de `historial_comparacion` de ese
+       día (cliente/planta/servidor/cámara/fecha) — la unidad es "resultado del día", no "resultado
+       de esta corrida en particular". Evita duplicar filas si el usuario corre dos veces porque la
+       primera se interrumpió a medio camino.
+   - **Decidido (21/10/2026) — el `.log` por servidor sí se lee, y es el primer dato que se procesa
+     por cámara**: antes de correr Fase 1/2, `main.py` parsea el `.log` del servidor
+     (`log_parse.py`) para saber qué cámaras intentó capturar el programa externo de revisión ese
+     día y con qué resultado (ip, si hubo error, cuál, y tiempo de proceso). Esto resuelve un
+     problema real: una cámara que falla por completo (ej. timeout de puerto) no genera ni `.jpg` ni
+     `.json`, así que descubrir cámaras solo por esos archivos la dejaba invisible — ahora el roster
+     de cámaras de cada corrida sale de la unión de archivos **y** `.log`. El diagnóstico se guarda
+     en `historial_comparacion` (`log_ip`/`log_estado`/`log_motivo`/`tiempo_proceso_seg`), separado
+     de `config_status`/`imagen_status` porque responde una pregunta distinta ("¿se pudo capturar?"
+     vs. "¿cambió?").
    - Decidido (03/10/2026) — **perfil estadístico por cámara, no umbrales globales fijos**. Surge
      directamente de los Experimentos 1-7 (Fase 2): hoy cada cámara se mide contra el mismo umbral
      (0.25% del ancho, 100 inliers, confianza 0.15) sin importar su "personalidad" — y ya vimos que
@@ -1091,13 +1136,81 @@ flowchart TD
        revisión** (sección 2.3), no de la estadística cruda sin más. Un clic en "Bien" es la señal
        de "este número en esta cámara es ruido confirmado"; un clic en "Mal" es la señal contraria.
        El aprendizaje queda anclado a juicio humano confirmado, no a varianza ciega.
-     - Boceto de esquema (a refinar cuando arranque esta fase):
-       - `historial_comparacion`: una fila por cámara por día — desplazamiento e inliers de ORB,
-         desplazamiento y confianza de correlación de fase, decisión del sistema, y el veredicto
-         humano si lo hubo (Bien/Mal/Sustituir Base). Es el registro crudo.
-       - `perfil_camara`: una fila por cámara, derivada del historial — mediana y p95 de
-         desplazamiento confirmado como ruido, si tiene patrón periódico conocido, su confianza
-         típica, última fecha de recálculo.
+     - **Esquema decidido (21/10/2026)**:
+
+       ```sql
+       -- Una fila por cámara física: catálogo (identidad) + estado vivo (semáforo, sección 2.7) +
+       -- perfil estadístico (Experimentos 1-9)
+       CREATE TABLE perfil_camara (
+           id                      SERIAL PRIMARY KEY,
+           cliente                 TEXT NOT NULL,
+           planta                  TEXT NOT NULL,
+           servidor                TEXT NOT NULL,
+           camara                  TEXT NOT NULL,
+           UNIQUE (cliente, planta, servidor, camara),
+
+           estado_actual                     TEXT NOT NULL DEFAULT 'verde',
+               -- verde | amarillo | rojo | morado | base_desactualizada
+           estado_desde                      DATE,
+           dias_no_concluyente_consecutivos  INT NOT NULL DEFAULT 0,
+
+           mediana_desplazamiento    REAL,
+           p95_desplazamiento        REAL,
+           metodo_preferido          TEXT,     -- orb | fase | ambos | NULL (arranque en frío)
+           n_confirmaciones_humanas  INT NOT NULL DEFAULT 0,
+           ultimo_recalculo          DATE,
+
+           creado_en       TIMESTAMPTZ NOT NULL DEFAULT now(),
+           actualizado_en  TIMESTAMPTZ NOT NULL DEFAULT now()
+       );
+
+       -- Una fila por cámara por día: registro crudo, alimenta el reporte y el recálculo de perfil
+       CREATE TABLE historial_comparacion (
+           id              BIGSERIAL PRIMARY KEY,
+           camara_id       INT NOT NULL REFERENCES perfil_camara(id),
+           fecha           DATE NOT NULL,
+
+           config_status        TEXT,    -- OK | REVISAR | MARCA_NO_SOPORTADA | SIN_ARCHIVO
+           config_marca          TEXT,
+           config_diferencias    JSONB,
+
+           imagen_status         TEXT,    -- OK | NO_CONCLUYENTE | REVISAR | BASE_DESACTUALIZADA | SIN_ARCHIVO
+           imagen_motivo          TEXT,
+           orb_inliers            INT,
+           orb_desplazamiento     REAL,
+           fase_confianza         REAL,
+           fase_desplazamiento    REAL,
+
+           veredicto_humano   TEXT,    -- bien | mal | desactualizada | NULL
+           modo               TEXT NOT NULL,  -- interactivo | sin_interaccion
+           corrida_ts         TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+           -- diagnóstico del .log del servidor (agregado 21/10/2026, migrations/0002): ¿se pudo
+           -- capturar esta cámara ese día?, independiente de si Fase 1/2 encontraron algo que comparar
+           log_ip              TEXT,
+           log_estado          TEXT,    -- OK | ERROR | NULL (cámara no vista en el .log)
+           log_motivo          TEXT,
+           tiempo_proceso_seg  REAL,
+
+           UNIQUE (camara_id, fecha)
+       );
+
+       CREATE INDEX ON historial_comparacion (camara_id, fecha DESC);
+       ```
+
+       - `perfil_camara` hace doble función (catálogo + estado + perfil) en vez de separar una tabla
+         de catálogo aparte — cliente/planta/servidor/cámara ya es la clave natural que usa la
+         estructura de carpetas en disco.
+       - `estado_actual` vive en `perfil_camara`, no se deriva de la fila de hoy en
+         `historial_comparacion`, porque el semáforo tiene memoria entre días (rojo/ámbar, ver
+         sección 2.7) — `main.py` lo consulta antes de decidir si abre `ventana_revision`.
+       - El marcador de base desactualizada (sección 2.8) usa el mismo campo
+         (`estado_actual = 'base_desactualizada'`) en vez del archivo `.desactualizada` — decidido
+         migrarlo junto con el resto de esta fase.
+       - `config_diferencias` como JSONB porque su forma varía según la marca de la cámara.
+       - Limitación aceptada: la identidad de la cámara es su ruta (cliente/planta/servidor/cámara);
+         si una cámara cambia de servidor, se trata como una cámara nueva (pierde su historial/perfil
+         previo) — aceptable por ahora, igual que ya pasa con los archivos en disco.
      - Decidido (03/10/2026), reforzado directamente por los Experimentos 8 y 9 del mismo día —
        **arranque en frío y método preferido por cámara**, dos refinamientos a `perfil_camara`:
        - **Arranque en frío**: una cámara nueva no tiene historial. Usa el umbral global (0.25% del
@@ -1126,59 +1239,154 @@ flowchart TD
        perfiles por cámara — sigue faltando el resto: resultados de Fase 1, resumen por corrida, etc.)
      - ¿Se necesita conservar histórico de todas las corridas o solo el estado más reciente?
 
-5. **Reporte ejecutivo**
+4. **Reporte ejecutivo (implementado 21/10/2026)**
    Generar un reporte ejecutivo con los resultados.
-   - Decidido: formato PDF, generación diaria (automática).
-   - Decidido: reporte detallado por planta, dirigido a Gerencia de Operaciones.
-   - Pendiente: el contenido específico del reporte (secciones, tablas, gráficos) se definirá
-     más adelante.
-   - Preguntas abiertas:
-     - ¿Qué debe contener exactamente (resumen de cámaras movidas, tablas, gráficos,
-       comparativas históricas)?
-     - ¿Cómo se dispara la generación diaria (tarea programada/cron, servicio corriendo en
-       segundo plano)?
-     - ¿Existe una plantilla o identidad visual corporativa a seguir?
-     - ¿El `resumen_[fecha].log` por cliente debe incorporarse a este reporte o es solo para
-       referencia humana?
+   - Decidido: formato PDF, generación diaria, al final de `main.py` (no un comando aparte) -- no
+     "por planta" como se pensó originalmente, sino **un PDF por cliente**, con todos sus
+     servidores/plantas juntos.
+   - **Decidido (21/10/2026) — disparo**: no automático sin más. En modo interactivo, `main.py`
+     pregunta en la línea de comandos ("¿Generar el reporte ejecutivo de esta corrida? (s/n)") antes
+     de generarlo. En `--sin-interaccion` (corridas desatendidas, sin nadie frente a la terminal)
+     sigue generándose automáticamente, sin preguntar -- no tendría quién conteste.
+   - **Estilo visual**: encabezado y pie adaptados de `models/reporte_pdf.py` en el proyecto
+     hermano `Cam_Lens_V2` (mismo logo, misma paleta, mismas Tables de ReportLab con banda oscura +
+     franjas alternadas) -- sin modificar ni importar nada de ese proyecto, solo replicando el
+     patrón visual (su contenido es una ficha de instalación de una sola cámara, no aplica aquí).
+     Encabezado con dos variantes: Cliente + Fecha en la hoja de resumen (cubre varias plantas a la
+     vez, no hay un solo servidor que mostrar ahí); Cliente + Planta + Fecha + Servidor en las
+     hojas de detalle. Pie de la hoja de resumen además trae una línea de simbología (qué significa
+     cada color).
+   - **Contenido decidido**: hoja 1 = tabla resumen, una fila por servidor del cliente (temperatura
+     CPU/GPU promedio del día + semáforo, uso de disco por punto de montaje + semáforo, cámaras
+     totales/OK/con falla); hoja 2 en adelante = una sección por servidor **que tenga al menos una
+     cámara en falla** (los sanos no generan hoja), con el detalle de esas cámaras (estado, motivo).
+   - **Reglas de "falla" para el detalle** (ROADMAP.md, sección 2.7 para el semáforo): 🔴 rojo y
+     🟣 morado siempre cuentan, igual que una cámara sin respuesta ese día (`.log` del servidor,
+     sección 3) mostrada también en rojo con su motivo real (ej. "Puerto 80 Timed out [111]"); 🟡
+     ámbar solo cuenta desde el 3er día seguido (`dias_no_concluyente_consecutivos`, ver Fase 3);
+     🔵 base desactualizada no cuenta (ya es un estado "en proceso", alguien ya lo marcó).
+   - **Datos de servidor (CPU/GPU/disco) vienen de `Monit_Servers_V2`** (proyecto hermano, otra
+     base de datos en el servidor DEVELOP) -- sin tocar ni importar ese proyecto, solo consumiendo
+     su API ya expuesta en `http://develop:8000` (`monit_client.py`). Hallazgos/decisiones:
+     - El puerto de Postgres de `Monit_Servers_V2` **no está publicado** en su `docker-compose.yml`
+       (por diseño, red interna de Docker) -- se descartó la conexión directa a esa BD.
+     - Su API no tiene un endpoint de "máximo del día" (`/historico` da **promedio**, no máximo) --
+       **decidido usar promedio** en vez de agregar un endpoint nuevo a ese proyecto o exponer su
+       base de datos. Para CPU/GPU se toma el promedio del **sensor más caliente** de ese
+       componente ese día (no el promedio entre sensores, para no diluir un núcleo/GPU puntual).
+     - Uso de disco: **último valor** (no máximo del día), uno por punto de montaje -- ya viene con
+       semáforo calculado por la propia API (`/disco/historico`).
+     - Los nombres de servidor **no siempre coinciden en mayúsculas/minúsculas** entre los dos
+       proyectos (ej. `APIMAN-FASE1` en Plant_Report vs `apiman-fase1` en Monit_Servers_V2) --
+       se cruzan normalizando a mayúsculas.
+     - Cobertura incompleta: un servidor que no existe en `Monit_Servers_V2` (o sin lecturas ese
+       día) muestra "Sin datos" en gris, sin bloquear el resto del reporte.
+   - **Módulos nuevos**: `reporte_ejecutivo.py` (construye el PDF, puro -- no sabe nada de bases de
+     datos, recibe `ResumenServidor` ya armado; permite generar un PDF de prueba con datos
+     inventados sin tocar ninguna BD real, ver `scripts/mock_reporte_ejecutivo.py`), `monit_client.py`
+     (cliente HTTP de solo lectura hacia la API de Monit_Servers_V2), `datos_reporte.py` (arma los
+     `ResumenServidor` consultando `perfil_camara`/`historial_comparacion` + `monit_client.py`, y
+     dispara `construir_pdf()` una vez por cliente). Variable de entorno nueva: `MONIT_API_URL`.
+     Salida (decidido 21/10/2026, configurable): `REPORTES_ROOT/<Cliente>/<YYYYMMDD>_<Cliente>.pdf`
+     -- `REPORTES_ROOT` es variable de entorno nueva, mismo patrón que `CHECK_PLANTS_ROOT`/
+     `IMAGE_BASE_ROOT`/`CONFIG_BASE_ROOT`.
+   - Probado end-to-end contra datos reales de producción (BD + API viva de Monit_Servers_V2,
+     fecha 02/10/2026 del sandbox): 3 PDFs generados (AbInBev 12 hojas, Api_Manzanillo, Pemex),
+     con temperaturas/disco reales de `QLYMSPROD01`/`QLYMSPROD02` (únicos con monitoreo completo
+     ese día) y "Sin datos" correctamente para el resto.
+   - **Decidido (21/10/2026)**: el `resumen_[fecha].log` por cliente **no** se incorpora a este
+     reporte -- el reporte ejecutivo ya construye su propio resumen desde la base de datos (más
+     confiable y detallado: semáforo, motivos, observaciones), y parsear un formato de texto
+     adicional solo duplicaría información que el reporte ya cubre con datos propios. Ese log queda
+     como referencia humana independiente, fuera de este repo.
+   - Resuelto por la Fase 5: los destinatarios de cada PDF (incluida Gerencia de Operaciones) se
+     configuran por cliente en `.env` (`REPORTE_DESTINATARIOS_<CLIENTE>`).
 
-6. **Enviar correo con el reporte**
-   Enviar por correo el PDF generado en la Fase 5 a las personas designadas para recibirlo.
+5. **Enviar correo con el reporte (implementado 21/10/2026)**
+   Enviar por correo el PDF generado en la Fase 4 a las personas designadas para recibirlo.
    - Decidido: el correo debe llevar la estructura/identidad de la empresa (firma, pie de página
      corporativo, etc.), no un correo genérico sin formato.
-   - Preguntas abiertas:
-     - ¿Quiénes son los destinatarios? ¿Una lista fija, o varía por cliente/planta (ej. cada
-       cliente recibe solo el reporte de sus propias plantas)?
-     - ¿Con qué servidor/servicio de correo se envía (SMTP corporativo, algún proveedor externo)?
-       ¿Dónde se guardan esas credenciales (`.env`)?
-     - ¿Existe ya una plantilla de correo/firma corporativa (HTML) a reutilizar, o hay que
-       diseñarla?
-     - ¿Qué pasa si el envío falla (reintentos, aviso a alguien, quedar registrado en el log)?
-     - ¿Va en copia alguien fijo (ej. Gerencia general, el equipo de Quantum Labs)?
+   - **Decidido — un correo por cliente**, con **todos sus destinatarios juntos en "Para"** (no un
+     correo por destinatario) y el PDF de ese cliente adjunto.
+   - **Decidido — destinatarios en `.env`, por cliente**: `REPORTE_DESTINATARIOS_<CLIENTE>`
+     (nombre normalizado a mayúsculas, ej. `REPORTE_DESTINATARIOS_API_MANZANILLO`), con
+     `REPORTE_DESTINATARIOS_DEFAULT` como respaldo si un cliente nuevo todavía no tiene su propia
+     variable — así nunca se queda sin enviar nada por simple falta de configuración. Por ahora
+     todos apuntan a los mismos 2 correos (`imedina@quantumlabs.ai`, `imkuri@yahoo.com`).
+   - **Decidido — SMTP**: Google Workspace (`imedina@quantumlabs.ai`) vía `smtp.gmail.com:587` +
+     STARTTLS, con **App Password** (no la contraseña normal de la cuenta -- requiere verificación
+     en 2 pasos activada). Cuenta y contraseña en `.env` (`SMTP_USER`/`SMTP_APP_PASSWORD`), nunca en
+     el código, para poder cambiarlas sin tocar nada más.
+   - **Decidido — plantilla en `.env`**: `REPORTE_ASUNTO` ("Informe de plantas [Cliente]") y
+     `REPORTE_CUERPO` (multilínea, valor entre comillas con saltos de línea reales -- `python-dotenv`
+     sí los conserva así), ambos con `[Cliente]`/`[cliente]` sustituido por el nombre real al armar
+     cada correo.
+   - **Decidido — firma**: tarjeta HTML (logo de Quantum Labs sobre fondo negro + datos de
+     contacto de Ismael Medina) debajo del cuerpo del correo. El logo se reutiliza
+     (`assets/QuantumLab-Logo-01.png`, fondo transparente) sobre una celda con fondo negro en el
+     HTML -- no hizo falta un archivo nuevo. Se embebe inline vía `Content-ID` (no una imagen
+     remota: varios clientes de correo bloquean imágenes externas por default).
+   - **Decidido — disparo**: pregunta aparte después de generar el reporte ("¿Enviar los reportes
+     por correo? (s/n)"), no la misma pregunta que genera el PDF -- permite revisar el PDF antes de
+     que llegue a los destinatarios. En `--sin-interaccion`, automático (sin preguntar), igual que
+     la generación del reporte.
+   - **Manejo de fallos decidido**: el envío de un cliente no bloquea a los demás (son independientes);
+     1-2 reintentos ante errores transitorios (timeout, conexión rechazada) antes de desistir; el PDF
+     ya quedó guardado en disco pase lo que pase, así que un fallo de correo nunca pierde trabajo
+     (se puede reenviar a mano); resumen claro en consola de qué se envió y qué falló, sin tabla
+     nueva en la BD por ahora (se puede agregar después si hace falta auditoría).
+   - **Módulo nuevo**: `correo.py` (`enviar_reportes()`), recibe `{cliente: ruta_pdf}` de
+     `datos_reporte.generar_reportes_del_dia()` y regresa `[(cliente, éxito, motivo_si_falló), ...]`.
+     Variables de entorno nuevas: `SMTP_HOST`/`SMTP_PORT`/`SMTP_USER`/`SMTP_APP_PASSWORD`,
+     `REPORTE_ASUNTO`/`REPORTE_CUERPO`, `REPORTE_DESTINATARIOS_*`.
+   - Probado: construcción completa del mensaje verificada (asunto con cliente sustituido, cuerpo +
+     firma con el `cid` del logo embebido correctamente, PDF adjunto) y el camino de fallo
+     verificado end-to-end (con `SMTP_APP_PASSWORD` todavía vacío, falla de forma controlada tras
+     los reintentos, sin tronar el programa).
+   - Pendiente: `SMTP_APP_PASSWORD` real (lo genera el usuario en su cuenta de Google -- requiere
+     verificación en 2 pasos activada) para probar un envío real de punta a punta.
 
 ## Observaciones por cámara (pedido 03/10/2026)
 
 Las cámaras deberían tener un **espacio de observaciones** — notas de contexto humano (ej. "cámara
 descompuesta, esperando repuesto", "se reorientó a propósito por una remodelación", "el camión de
 este patio es permanente, no es un falso positivo") que luego aparezcan en el reporte ejecutivo
-(Fase 5). La diferencia con el semáforo de estados (sección 2.7) es que esto no es un veredicto
+(Fase 4). La diferencia con el semáforo de estados (sección 2.7) es que esto no es un veredicto
 automático ni el resultado de una comparación — es contexto libre que alguien agrega a mano para
 explicar algo que los números solos no cuentan.
 
 - Decidido: la observación vive ligada a la **cámara**, no a una corrida/día puntual — tiene que
   sobrevivir entre corridas para que el reporte la recoja cuando corresponda.
-- Decidido: el lugar lógico para guardarla es la **base de datos** (Fase 4), no un archivo aparte —
+- Decidido: el lugar lógico para guardarla es la **base de datos** (Fase 3), no un archivo aparte —
   mismo razonamiento que `perfil_camara`: necesita sobrevivir, ser consultable por cámara, y
-  alimentar Fase 5 sin depender de que exista un archivo específico ese día.
-- Preguntas abiertas, sin resolver todavía:
-  - **¿Dónde se capturan?** ¿Desde `ventana_revision.py` (al momento de revisar una cámara dudosa),
-    desde una ventana aparte (al estilo `ventana_bases.py`, para poder anotar cualquier cámara en
-    cualquier momento, no solo las que salieron `REVISAR`), o ambas?
-  - **¿Dónde se almacenan exactamente?** Confirmado que es la base de datos, pero falta el diseño:
-    ¿una tabla `observacion_camara` separada de `historial_comparacion`/`perfil_camara` (sección
-    2.3/Fase 4), con qué campos (texto, fecha, quién la escribió)?
-  - **¿Cómo se actualizan y borran?** ¿Es una nota viva por cámara que se sobrescribe, o un historial
-    de notas con fecha (como un log de bitácora)? ¿Cualquiera puede borrar una observación, o debe
-    quedar registro de que existió (para no perder contexto de por qué algo se ignoró en su momento)?
+  alimentar Fase 4 sin depender de que exista un archivo específico ese día.
+- **Decidido (21/10/2026) — esquema**, zanjando las dos preguntas de abajo: bitácora, no nota única
+  que se sobrescribe — varias observaciones pueden coexistir por cámara a lo largo del tiempo, y
+  "borrar" una la cierra en vez de eliminarla (no se pierde el contexto de por qué algo se ignoró en
+  su momento):
+
+  ```sql
+  CREATE TABLE observacion_camara (
+      id          BIGSERIAL PRIMARY KEY,
+      camara_id   INT NOT NULL REFERENCES perfil_camara(id),
+      texto       TEXT NOT NULL,
+      creado_en   TIMESTAMPTZ NOT NULL DEFAULT now(),
+      resuelta_en TIMESTAMPTZ   -- NULL mientras sigue vigente
+  );
+  ```
+
+  Implementado en `migrations/0003_observacion_camara.sql` + `db.crear_observacion()`.
+- **Decidido (21/10/2026) — dónde se capturan, por ahora**: un campo de texto opcional en
+  `ventana_revision.py`, justo al resolver un `REVISAR` (junto a los botones Bien/Mal/Base
+  Desactualizada) — `pedir_revision()` ahora regresa `(accion, observacion)` en vez de solo
+  `accion`, y `main.py` llama a `db.crear_observacion()` si se escribió algo.
+  - **Limitación aceptada a propósito**: una cámara que no pasa por esa ventana (ya confirmada en
+    🔴 rojo, o en 🟡 ámbar -- ninguna de las dos reabre `ventana_revision`, ver sección 2.7) no
+    tiene hoy forma de recibir una nota nueva ni de cerrar una existente. No se resuelve en este
+    repo: **habrá un programa de administración aparte** (desarrollo nuevo, fuera de este alcance)
+    para editar cámaras/observaciones con más libertad, entre otras funciones todavía sin definir.
+  - Queda pendiente, para cuando exista ese programa de administración: cerrar observaciones
+    (`resuelta_en`) y anotar cámaras en rojo/ámbar sin pasar por `ventana_revision`.
 
 ## Preguntas generales de ejecución
 
@@ -1192,6 +1400,17 @@ explicar algo que los números solos no cuentan.
   (`main.py`), pero los pasos que requieren juicio humano ya tienen su propia ventana —
   `ventana_revision.py` (revisar cámaras dudosas) y `ventana_bases.py` (reemplazar bases
   desactualizadas) — en vez de resolverse por línea de comandos.
+- **Decidido (21/10/2026) — bandera `--cliente`**: al empezar a correr contra datos reales (varios
+  clientes a la vez bajo `CHECK_PLANTS_ROOT`), hacía falta poder acotar una corrida a un solo
+  cliente para probar o revisar sin tocar a los demás. `main.py --cliente AbInBev` filtra desde el
+  recorrido de archivos (nombre exacto de la carpeta de cliente) -- sin la bandera, procesa todos
+  los clientes encontrados esa fecha, igual que antes. `main.py --help` documenta todas las
+  banderas (`--sin-interaccion`, `--cliente`).
+- **Fuera de alcance (anotado 21/10/2026)**: habrá un **programa de administración aparte**
+  (desarrollo nuevo, no este repo) para editar cámaras, cerrar/editar observaciones, y otras
+  funciones todavía sin definir. Cualquier pendiente de este proyecto que solo tenga sentido
+  resolver desde una pantalla de edición libre (no desde el flujo diario de `main.py`) debe quedar
+  anotado como dependiente de ese programa futuro, no implementarse aquí.
 
 ## Estado
 
@@ -1252,7 +1471,7 @@ explicar algo que los números solos no cuentan.
       comportan como se esperaba; el zoom es un punto ciego confirmado de la geometría (0.2-0.65 px,
       `OK`, y tampoco lo cubre Fase 1 hoy — ver pendiente ahí); y la relación grados↔píxeles real
       resultó ~10x mayor que la simulada por el paralaje de objetos cercanos, reforzando con datos
-      la necesidad del perfil por cámara de Fase 4
+      la necesidad del perfil por cámara de Fase 3
 - [x] Fase 2: **Experimento 9 (03/10/2026)** — Experimentos 1 y 3 rehechos con esquinas enmascaradas.
       Confirma que el diseño nunca miente, pero revela que varias cámaras que parecían fáciles
       (`ZAC_E1p`, `ZAC_P1p`, `MED_B03`) sacaban su confianza del texto sobreimpreso, no de la escena
@@ -1268,7 +1487,7 @@ explicar algo que los números solos no cuentan.
       pendientes en la curación manual (ej. `MEDELLIN/B04-B06`) generan su base sola, sin haber
       necesitado curación a mano — confirma el Experimento 3. Umbral de movimiento detrás de
       `umbral_para()` (hoy regresa el global, listo para engancharse a `perfil_camara` sin tocar el
-      resto del módulo cuando exista Fase 4). Variable de entorno nueva: `IMAGE_BASE_ROOT`.
+      resto del módulo cuando exista Fase 3). Variable de entorno nueva: `IMAGE_BASE_ROOT`.
       Dependencias nuevas en el Pipfile principal: `opencv-python`, `numpy`.
 - [x] Fase 2: ventana de revisión conectada al flujo real (`main.py`), con bandera
       `--sin-interaccion`; botón "Base Desactualizada" marca la base en vez de sustituirla de
@@ -1294,7 +1513,62 @@ explicar algo que los números solos no cuentan.
 - [ ] Coordinar con quien mantenga el programa externo de revisión para agregar
       `PTZCtrl/channels/1/status` a la descarga de HIKVISION (bloqueante para que el zoom de Fase 1
       sirva de algo en la práctica)
-- [ ] Fase 3 definida (actualización del log)
-- [ ] Fase 4 definida (persistencia en base de datos)
-- [ ] Fase 5 definida (reporte ejecutivo)
-- [ ] Fase 6 definida (envío de correo con el reporte)
+- [x] Fase 3: decidido (21/10/2026) eliminar el paso intermedio de "actualización del log" y
+      fusionarlo con la persistencia en base de datos — sin archivo intermedio (ni reescribir el
+      `.log` original ni generar uno nuevo), escritura directa a Postgres cámara por cámara (incluye
+      el veredicto humano), con upsert por día para tolerar corridas repetidas (ver sección 3 arriba)
+- [x] Fase 3: **base de datos creada y módulo implementado (21/10/2026)** — Postgres real
+      (`plant_report`), esquema de `perfil_camara`/`historial_comparacion` aplicado vía
+      `migrate.py` (corredor simple de migraciones, `migrations/0001_init.sql`). Nuevo `db.py`:
+      `obtener_camara()` (upsert de catálogo), `guardar_resultado()` (upsert de
+      `historial_comparacion` + máquina de estados del semáforo), `camaras_con_base_desactualizada()`
+      / `marcar_base_reemplazada()` para `ventana_bases.py`. Conectado a `main.py`, que ahora
+      persiste cada cámara justo después de resolverla (no en lote). El marcador de archivo
+      `.desactualizada` de la sección 2.8 se eliminó de `image_compare.py` y migró por completo a
+      `perfil_camara.estado_actual`; `ventana_bases.py` ya consulta la BD en vez de escanear disco.
+      Probado end-to-end contra las 210 cámaras del sandbox (209 con `.jpg`/`.json` ese día):
+      corrida repetida sobre la misma fecha confirma el upsert (209 filas, sin duplicar), y una
+      prueba aislada de la máquina de estados confirma rojo → no se re-pregunta → recupera solo a
+      verde cuando la comparación vuelve a dar `OK` (regla de la sección 2.7).
+- [x] Fase 3: confirmado (21/10/2026) que `plant_report` en `localhost:5432` **es** la base de datos
+      definitiva, no una de pruebas — el programa solo vive en esta máquina (ver "Preguntas generales
+      de ejecución"), así que no hay credenciales distintas que resolver para producción.
+- [x] Fase 3: **ingesta del `.log` por servidor (21/10/2026)** — nuevo `log_parse.py`
+      (`parsear_log_servidor()`) y columnas `log_ip`/`log_estado`/`log_motivo`/`tiempo_proceso_seg`
+      en `historial_comparacion` (`migrations/0002_log_servidor.sql`). Responde a la pregunta de si
+      el `.log` se lee desde el principio: **ahora sí** — `_camaras_del_dia()` en `main.py` ya no
+      descubre cámaras solo por la existencia de `.jpg`/`.json`, también lee el `.log` de cada
+      servidor y agrega las cámaras que fallaron por completo (ej. timeout de puerto, que no genera
+      ni `.jpg` ni `.json` y antes las dejaba invisibles para todo el programa). `SIN ARCHIVO` ahora
+      muestra el motivo real cuando está disponible (ej. `SIN ARCHIVO (Puerto 80 Timed out [111])`).
+      Tolera ambos finales de línea (LF/CRLF) y, hallazgo nuevo de esta prueba, **ambas
+      codificaciones** — AbInBev viene en UTF-8, API-MANZANILLO en cp1252 (se ve en los acentos de
+      "Imagen cámara"/"Configuración" en sus líneas `ERROR`); `log_parse.py` intenta UTF-8 y cae a
+      cp1252 si falla. Probado contra los `.log` reales del sandbox: sobre la fecha 22/09/2026, las
+      cámaras con resultado pasaron de 144 a 175 al incluir las que fallan por completo (31 con
+      `log_estado = 'ERROR'`, con motivos reales: `Timed out [111]`, `Connection error [199]`,
+      `Service Unavailable [503]`); upsert por día confirmado estable tras una segunda corrida.
+- [x] **Observaciones por cámara implementadas (21/10/2026)** — `observacion_camara`
+      (`migrations/0003_observacion_camara.sql`) + `db.crear_observacion()`. Campo de texto opcional
+      agregado a `ventana_revision.pedir_revision()` (ahora regresa `(accion, observacion)`), junto
+      a los tres botones; `main.py` guarda la nota si no quedó vacía. Probado de punta a punta
+      (click simulado + verificación directa en Postgres). Limitación aceptada: cámaras en rojo/ámbar
+      no pasan por esa ventana, así que no pueden recibir ni cerrar notas todavía — queda para el
+      programa de administración aparte (ver nota de alcance abajo).
+- [x] **Fase 4 implementada (21/10/2026)** — PDF ejecutivo por cliente, al final de `main.py`;
+      pregunta en consola antes de generarlo en modo interactivo, automático en `--sin-interaccion`. `reporte_ejecutivo.py` (construcción pura del PDF) + `monit_client.py` (API de
+      Monit_Servers_V2 para CPU/GPU/disco) + `datos_reporte.py` (arma los datos desde
+      `perfil_camara`/`historial_comparacion` + Monit). Probado contra datos reales de producción
+      (ver sección 4 arriba para el detalle completo: reglas de falla, promedio vs. máximo,
+      normalización de nombres, cobertura incompleta de Monit_Servers_V2).
+- [x] Fase 4: decidido (21/10/2026) que el `resumen_[fecha].log` por cliente **no** se incorpora al
+      reporte ejecutivo -- queda como referencia humana independiente (ver sección 4 arriba)
+- [x] **Fase 5 implementada (21/10/2026)** — `correo.py`, un correo por cliente (todos sus
+      destinatarios juntos en "Para", PDF adjunto), SMTP de Google Workspace con App Password,
+      plantilla y destinatarios por cliente en `.env`, firma HTML con el logo reutilizado (sin
+      archivo nuevo). Disparo con pregunta propia en consola (automático en `--sin-interaccion`).
+      Manejo de fallos: independiente por cliente, con reintentos, sin perder el PDF ya generado.
+      Probado end-to-end salvo el envío real (falta que el usuario genere su App Password de Google).
+- [ ] **Mejorar el reporte PDF (pedido 21/10/2026)** -- a partir de lo visto corriendo
+      `backfill_reportes.py` contra octubre/2026 real. Detalle de qué mejorar: pendiente de
+      definir con el usuario.
