@@ -45,9 +45,19 @@ def _calcular_estado(rangos: dict, valor: float) -> str:
 def _servidores_monit() -> dict[str, str]:
     """{NOMBRE_EN_MAYUSCULAS: nombre_real_en_monit} -- los nombres no siempre coinciden en
     mayúsculas/minúsculas entre los dos proyectos (ej. "APIMAN-FASE1" en Plant_Report vs
-    "apiman-fase1" en Monit_Servers_V2, visto al revisar su inventario real)."""
-    r = requests.get(f"{BASE_URL}/api/servidores", timeout=_TIMEOUT_S)
-    r.raise_for_status()
+    "apiman-fase1" en Monit_Servers_V2, visto al revisar su inventario real).
+
+    Si Monit_Servers_V2 no responde (API caída, VPN sin conexión a `develop`, etc.) regresa un
+    diccionario vacío en vez de reventar -- el reporte ejecutivo no debe depender de que esa API
+    esté arriba (pedido 22/10/2026, tras una corrida real que se cayó por completo por esto). Al
+    estar cacheada con `lru_cache`, ese vacío también se cachea -- no se reintenta 10s por cada
+    servidor del reporte si Monit_Servers_V2 ya falló una vez en esta corrida."""
+    try:
+        r = requests.get(f"{BASE_URL}/api/servidores", timeout=_TIMEOUT_S)
+        r.raise_for_status()
+    except requests.exceptions.RequestException as e:
+        print(f"  (!) Monit_Servers_V2 no respondió ({e}) -- el reporte seguirá sin esos datos")
+        return {}
     return {fila["nombre"].upper(): fila["nombre"] for fila in r.json()}
 
 
@@ -63,16 +73,21 @@ def temperaturas_promedio_dia(servidor: str, fecha: date) -> dict[str, MetricaSe
     if nombre is None:
         return None
 
-    r = requests.get(
-        f"{BASE_URL}/api/servidores/{nombre}/historico",
-        params={"agrupacion": "dia", "completo": False}, timeout=_TIMEOUT_S,
-    )
-    r.raise_for_status()
-    filas = r.json()
+    try:
+        r = requests.get(
+            f"{BASE_URL}/api/servidores/{nombre}/historico",
+            params={"agrupacion": "dia", "completo": False}, timeout=_TIMEOUT_S,
+        )
+        r.raise_for_status()
+        filas = r.json()
 
-    r_hw = requests.get(f"{BASE_URL}/api/servidores/{nombre}/hardware", timeout=_TIMEOUT_S)
-    r_hw.raise_for_status()
-    umbrales = r_hw.json().get("umbrales") or _UMBRALES_DEFAULT
+        r_hw = requests.get(f"{BASE_URL}/api/servidores/{nombre}/hardware", timeout=_TIMEOUT_S)
+        r_hw.raise_for_status()
+        umbrales = r_hw.json().get("umbrales") or _UMBRALES_DEFAULT
+    except requests.exceptions.RequestException as e:
+        # Igual que _servidores_monit() -- una falla de red puntual no debe tumbar el reporte.
+        print(f"  (!) Monit_Servers_V2 no respondió para {servidor} ({e}) -- sin datos de temperatura")
+        return {"cpu": MetricaServidor(None, None), "gpu": MetricaServidor(None, None)}
 
     resultado: dict[str, MetricaServidor] = {}
     for componente in ("cpu", "gpu"):
@@ -98,12 +113,16 @@ def uso_disco_actual(servidor: str) -> list[MontajeDisco]:
     if nombre is None:
         return []
 
-    r = requests.get(
-        f"{BASE_URL}/api/servidores/{nombre}/disco/historico",
-        params={"agrupacion": "hora", "completo": False}, timeout=_TIMEOUT_S,
-    )
-    r.raise_for_status()
-    periodos = r.json()  # ya vienen ordenados por período ascendente
+    try:
+        r = requests.get(
+            f"{BASE_URL}/api/servidores/{nombre}/disco/historico",
+            params={"agrupacion": "hora", "completo": False}, timeout=_TIMEOUT_S,
+        )
+        r.raise_for_status()
+        periodos = r.json()  # ya vienen ordenados por período ascendente
+    except requests.exceptions.RequestException as e:
+        print(f"  (!) Monit_Servers_V2 no respondió para {servidor} ({e}) -- sin datos de disco")
+        return []
     if not periodos:
         return []
     return [

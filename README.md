@@ -42,7 +42,7 @@ copy .env.example .env
 | `IMAGE_BASE_ROOT` | Imagen "base" de referencia de cada cámara (`[Cliente]\[Planta]\[Servidor]\[Cámara].jpg`). También se crea sola la primera vez. |
 | `REPORTES_ROOT` | Carpeta donde se guardan los PDFs del reporte ejecutivo, uno por cliente: `REPORTES_ROOT\[Cliente]\[DDMMYYYY]_[Cliente].pdf`. |
 | `DB_HOST` / `DB_PORT` / `DB_NAME` / `DB_USER` / `DB_PASSWORD` | Conexión a PostgreSQL. |
-| `MONIT_API_URL` | URL base de la API de `Monit_Servers_V2` (proyecto hermano), para traer temperatura CPU/GPU y uso de disco de cada servidor. Si un servidor no existe ahí, el reporte muestra "Sin datos" sin bloquear nada. |
+| `MONIT_API_URL` | URL base de la API de `Monit_Servers_V2` (proyecto hermano), para traer temperatura CPU/GPU y uso de disco de cada servidor. Si un servidor no existe ahí, o si la API no responde (caída, sin VPN, etc.), el reporte muestra "Sin datos" sin bloquear nada. |
 | `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_APP_PASSWORD` | Cuenta de correo (Google Workspace) usada para enviar el reporte. `SMTP_APP_PASSWORD` es una contraseña de aplicación (myaccount.google.com → Seguridad → Verificación en 2 pasos → Contraseñas de aplicaciones), no la contraseña normal de la cuenta. |
 | `REPORTE_ASUNTO` | Plantilla del asunto del correo, con `[Cliente]` como placeholder. |
 | `REPORTE_CUERPO` | Plantilla del cuerpo del correo (texto plano, se arma como HTML con la firma de Quantum Labs debajo), con `[cliente]` como placeholder. |

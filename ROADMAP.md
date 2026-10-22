@@ -1710,3 +1710,18 @@ explicar algo que los números solos no cuentan.
       Verificado contra la base de datos real del 22/10/2026: las 11 filas de servidores de AbInBev
       reconciliaron exactamente (`camaras_ok + camaras_no_concluyentes + len(fallas) ==
       camaras_totales` en los 11 casos), y `QLYMSPROD01` pasó de mostrar 40/31/0 a 40/31/9/0.
+- [x] **Bug real encontrado al usar `generar_reporte.py` en producción (22/10/2026)**: el usuario
+      corrió `generar_reporte.py --date h --client AbInBev` y el programa reventó por completo con
+      un `ConnectTimeoutError` hacia `develop:8000` -- la API de `Monit_Servers_V2` (o la VPN hacia
+      ella) no estaba disponible en ese momento. `monit_client.py` no atrapaba ningún error de red:
+      ni `_servidores_monit()`, ni `temperaturas_promedio_dia()`, ni `uso_disco_actual()` -- solo
+      manejaban el caso "el servidor no existe en Monit_Servers_V2", nunca "Monit_Servers_V2 no
+      responde". Esto contradecía lo que ya decía el propio README ("si un servidor no existe ahí,
+      el reporte muestra 'Sin datos' sin bloquear nada") -- el reporte ejecutivo nunca debió depender
+      de que esa API estuviera arriba. Corregido envolviendo las tres funciones en
+      `try/except requests.exceptions.RequestException`, regresando "Sin datos" (igual que cuando el
+      servidor no existe) en vez de propagar la excepción, con un aviso impreso en consola para que
+      quede claro por qué faltan esos datos. `_servidores_monit()` sigue cacheada con `lru_cache`, así
+      que si Monit_Servers_V2 ya falló una vez en la corrida, no se reintenta 10s por cada servidor
+      del reporte. Verificado repitiendo el comando real del usuario con la API sigue caída: ya no
+      truena, genera el PDF con "Sin datos" en CPU/GPU/disco y envía el correo con normalidad.
