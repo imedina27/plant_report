@@ -1569,6 +1569,43 @@ explicar algo que los números solos no cuentan.
       archivo nuevo). Disparo con pregunta propia en consola (automático en `--sin-interaccion`).
       Manejo de fallos: independiente por cliente, con reintentos, sin perder el PDF ya generado.
       Probado end-to-end salvo el envío real (falta que el usuario genere su App Password de Google).
-- [ ] **Mejorar el reporte PDF (pedido 21/10/2026)** -- a partir de lo visto corriendo
-      `backfill_reportes.py` contra octubre/2026 real. Detalle de qué mejorar: pendiente de
-      definir con el usuario.
+- [x] **Mejoras al reporte PDF (21/10/2026)** -- a partir de lo visto corriendo
+      `backfill_reportes.py` contra octubre/2026 real:
+      - **Orden de servidores**: alfabético por nombre de servidor en general, con un caso especial
+        para AbInBev (mezcla prefijos `QLYMSPROD`/`QBYMSPROD`; el orden que importa es el de los
+        últimos dígitos -- `01, 02, ..., 11` -- no el alfabético, que pondría `QBYMSPROD07` antes
+        que `QLYMSPROD01` por la "B" vs. "L"). Los demás clientes siguen alfabético simple.
+      - **Columna de disco(s)**: nombre del punto de montaje a la izquierda, porcentaje a la
+        derecha (antes todo centrado en una sola línea) -- más fácil de comparar de un vistazo.
+      - **"Estado" descriptivo, separado de "Motivo"**: antes "Estado" solo mostraba el color
+        ("Rojo"/"Morado") y el motivo técnico venía concatenado en un solo texto. Ahora "Estado"
+        trae una etiqueta legible y "Motivo" el detalle técnico puro, cada uno en su columna.
+      - **Tres niveles dentro de "cámara sin respuesta"** (antes un solo letrero genérico para
+        cualquier error del `.log`, lo cual escondía diferencias de gravedad reales -- detectado al
+        ver `AD1p` con "Configuración Unknow error" y `AD1r2` con "Puerto 80 Timed out" mostrando
+        el mismo letrero): el texto del `.log` siempre empieza con el nombre del paso que falló, así
+        que se deriva la etiqueta de ahí --
+        - `Puerto 80 ...` → **"Cámara sin respuesta"** (🔴 rojo) -- no contestó en absoluto, nada
+          más se intentó.
+        - `Imagen IA ...` / `Imagen cámara ...` → **"Imagen no disponible"** (🔴 rojo) -- el puerto
+          respondió, solo falló la imagen.
+        - `Configuración ...` → **"Configuración no disponible"** (🟡 ámbar, no rojo -- la cámara
+          está viva y capturando, es el menos grave de los tres).
+        - Cualquier otro texto no previsto → **"Error desconocido"** (🔴 rojo, por si acaso).
+      - **Imagen base + actual debajo de cada cámara con discrepancia** (rojo confirmado, morado,
+        ámbar -- no para "sin respuesta", ahí no hay "actual" que capturar ese día), con la misma
+        cuadrícula guía que ya usa `ventana_revision.py` (ayuda a juzgar a ojo si se movió). La
+        imagen base se resuelve con `image_compare.base_path()`; la actual se busca con un glob
+        puntual sobre `CHECK_PLANTS_ROOT` para esa fecha exacta (no se guarda la ruta en la BD).
+      - Todo verificado con imágenes reales (incluida la cuadrícula renderizando bien en ambos
+        casos) antes de darlo por bueno.
+- [x] **Primera corrida real de punta a punta (21/10/2026)** — `main.py` completo (sin
+      `--sin-interaccion`), fecha de hoy, los 4 clientes reales bajo `CHECK_PLANTS_ROOT` (267
+      cámaras AbInBev + Api_Manzanillo encontradas, Pemex/C5i_Colima sin datos ese día, ver nota en
+      "Estructura de datos"). Confirmado: persistencia real en Postgres (265 filas en
+      `perfil_camara`/`historial_comparacion`, todas en verde), generación del PDF y la pregunta de
+      correo respetando "no" sin enviar nada. Pendiente real, no simulado: ninguna cámara dio
+      `REVISAR` ese día, así que **la ventana de revisión (`ventana_revision.py`) con un humano
+      dándole clic contra la base de datos real sigue sin probarse de principio a fin** -- en cuanto
+      aparezca una cámara en morado/rojo en una corrida real, vale la pena confirmar que el flujo
+      completo (observación incluida) funciona igual de bien que en las pruebas aisladas.

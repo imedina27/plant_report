@@ -16,12 +16,15 @@ puede generar un PDF de prueba con datos inventados sin tocar ninguna base de da
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import date
+from io import BytesIO
 from pathlib import Path
 
+from PIL import Image as PILImage
 from reportlab.lib import colors
-from reportlab.lib.enums import TA_CENTER, TA_RIGHT
+from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.platypus import (
@@ -36,6 +39,8 @@ from reportlab.platypus import (
     Table,
     TableStyle,
 )
+
+from ventana_revision import _con_cuadricula
 
 LOGO = Path(__file__).parent / "assets" / "QuantumLab-Logo-01.png"
 
@@ -105,8 +110,11 @@ class MontajeDisco:
 @dataclass
 class CamaraFalla:
     camara: str
-    estado: str  # "morado" | "rojo" | "amarillo" (ámbar solo llega aquí si ya es 3+ días seguidos)
-    motivo: str
+    estado: str  # "morado" | "rojo" | "amarillo" (ámbar solo llega aquí si ya es 3+ días seguidos) -- color de la celda
+    etiqueta: str  # texto que se muestra en "Estado" (ej. "Cámara sin respuesta") -- descriptivo, no el color crudo
+    motivo: str  # detalle técnico puro (ej. "Puerto 80 Timed out [111]")
+    ruta_base: Path | None = None  # None = sin imagen que mostrar (ej. cámara sin respuesta ese día)
+    ruta_actual: Path | None = None
 
 
 @dataclass
@@ -215,8 +223,8 @@ def _tabla_pie(cliente: str, num_hoja: int, total_hojas: int) -> Table:
 
 _SIMBOLOGIA = [
     (VERDE, "OK"),
-    (AMBAR, "No concluyente (3+ días seguidos)"),
-    (ROJO, "Falla confirmada / servidor sin respuesta"),
+    (AMBAR, "No concluyente (3+ días) / configuración no disponible"),
+    (ROJO, "Falla confirmada / cámara o imagen sin respuesta"),
     (MORADO, "Pendiente de revisión"),
     (GRIS, "Sin datos de monitoreo"),
 ]
@@ -257,17 +265,80 @@ def _texto_metrica(metrica: MetricaServidor | None) -> Paragraph:
     return _celda_estado(f"{metrica.valor_c:.1f} °C", _COLOR_ESTADO.get(metrica.estado))
 
 
-def _texto_discos(discos: list[MontajeDisco]) -> Paragraph:
+_ESTILO_DISCO_NOMBRE = ParagraphStyle(
+    "disco_nombre", fontName="Helvetica-Bold", fontSize=8, textColor=NEGRO, alignment=TA_LEFT,
+)
+
+
+def _texto_discos(discos: list[MontajeDisco], ancho_pt: float) -> Table | Paragraph:
+    """Nombre del punto de montaje a la izquierda, porcentaje a la derecha (coloreado según su
+    semáforo) -- más fácil de comparar de un vistazo que centrado (pedido 21/10/2026)."""
     if not discos:
         return _celda_estado("Sin datos", GRIS)
-    lineas = []
+    filas = []
     for d in discos:
         color = _COLOR_ESTADO.get(d.estado, NEGRO)
-        lineas.append(f'<font color="{color.hexval()}">{d.punto_montaje} {d.porcentaje:.0f}%</font>')
-    return Paragraph("<br/>".join(lineas), ParagraphStyle("discos", parent=_ESTILO_VAL))
+        estilo_pct = ParagraphStyle("disco_pct", fontName="Helvetica-Bold", fontSize=8, textColor=color, alignment=TA_RIGHT)
+        filas.append([_p(d.punto_montaje, _ESTILO_DISCO_NOMBRE), _p(f"{d.porcentaje:.0f}%", estilo_pct)])
+    t = Table(filas, colWidths=[ancho_pt * 0.65, ancho_pt * 0.35])
+    t.setStyle(TableStyle([
+        ("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+        ("TOPPADDING", (0, 0), (-1, -1), 1), ("BOTTOMPADDING", (0, 0), (-1, -1), 1),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+    ]))
+    return t
 
 
-def _tabla_resumen_servidores(servidores: list[ResumenServidor]) -> Table:
+def _imagen_proporcional(path: Path, ancho_pt: float) -> Image:
+    """Carga la imagen con la misma cuadrícula guía que `ventana_revision.py` (ayuda a juzgar a
+    ojo si la cámara se movió), con la proporción real del archivo -- nunca un ratio fijo a ojo."""
+    img = _con_cuadricula(PILImage.open(path))
+    buf = BytesIO()
+    img.save(buf, format="JPEG", quality=85)
+    buf.seek(0)
+    alto_pt = ancho_pt * img.height / img.width
+    return Image(buf, width=ancho_pt, height=alto_pt)
+
+
+_GUTTER_IMAGENES_PT = 10
+
+
+def _fila_imagenes(ruta_base: Path, ruta_actual: Path) -> Table:
+    ancho_img = (ANCHO_CONTENIDO_PT - _GUTTER_IMAGENES_PT) / 2
+    data = [
+        [_p("Base", _ESTILO_ETQ), "", _p("Actual", _ESTILO_ETQ)],
+        [_imagen_proporcional(ruta_base, ancho_img), "", _imagen_proporcional(ruta_actual, ancho_img)],
+    ]
+    t = Table(data, colWidths=[ancho_img, _GUTTER_IMAGENES_PT, ancho_img])
+    t.setStyle(TableStyle([
+        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("BOX", (0, 0), (0, -1), 0.75, BORDE),
+        ("BOX", (2, 0), (2, -1), 0.75, BORDE),
+        ("TOPPADDING", (1, 0), (1, 0), 4), ("BOTTOMPADDING", (0, 0), (-1, 0), 2),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+    ]))
+    return t
+
+
+_ANCHO_COL_DISCOS_PT = ANCHO_CONTENIDO_PT * 0.20
+
+
+def _clave_orden_servidor(cliente: str, nombre: str) -> tuple:
+    """Orden por nombre de servidor (pedido 21/10/2026) -- antes era planta primero. Caso especial
+    de AbInBev: sus servidores mezclan dos prefijos (QLYMSPROD/QBYMSPROD) pero el orden que importa
+    es el de los últimos dígitos (01, 02, ..., 11) sin importar el prefijo -- alfabético normal los
+    pondría mal (QBYMSPROD07 antes que QLYMSPROD01, por la "B" vs. "L"). Los demás clientes usan
+    orden alfabético simple."""
+    if cliente == "AbInBev":
+        m = re.search(r"(\d+)$", nombre)
+        if m:
+            return (0, int(m.group(1)))
+    return (1, nombre)
+
+
+def _tabla_resumen_servidores(cliente: str, servidores: list[ResumenServidor]) -> Table:
+    servidores = sorted(servidores, key=lambda s: _clave_orden_servidor(cliente, s.nombre))
     encabezados = [
         _p(t, _ESTILO_ETQ) for t in
         ["Servidor", "CPU", "GPU", "Disco(s)", "Cámaras\ntotales", "Cámaras\nOK", "Cámaras\ncon falla"]
@@ -280,7 +351,7 @@ def _tabla_resumen_servidores(servidores: list[ResumenServidor]) -> Table:
             _p(f"{s.nombre}<br/><font size=7 color='#8A8A92'>{s.planta}</font>", _ESTILO_VAL),
             _texto_metrica(s.cpu),
             _texto_metrica(s.gpu),
-            _texto_discos(s.discos),
+            _texto_discos(s.discos, _ANCHO_COL_DISCOS_PT - 12),  # -12: el LEFT/RIGHTPADDING de la celda
             _celda_estado(str(s.camaras_totales)),
             _celda_estado(str(s.camaras_ok), VERDE),
             _celda_estado(str(n_fallas), color_fallas),
@@ -298,15 +369,26 @@ def _tabla_fallas_servidor(servidor: ResumenServidor) -> Table:
         [_p("CÁMARAS CON FALLA", _ESTILO_BANDA), "", ""],
         [_p("Cámara", _ESTILO_ETQ), _p("Estado", _ESTILO_ETQ), _p("Motivo", _ESTILO_ETQ)],
     ]
+    filas_imagenes: list[int] = []
     for f in servidor.fallas:
         data.append([
             _p(f.camara, _ESTILO_VAL),
-            _celda_estado(f.estado.capitalize(), _COLOR_ESTADO.get(f.estado)),
+            _celda_estado(f.etiqueta, _COLOR_ESTADO.get(f.estado)),
             _p(f.motivo, ParagraphStyle("motivo", parent=_ESTILO_VAL, alignment=1)),
         ])
+        # Sin imagen que mostrar para fallas que no vienen de comparar imagen (ej. cámara sin
+        # respuesta ese día -- no hay "actual" que capturar). Pedido 21/10/2026.
+        if f.ruta_base is not None and f.ruta_actual is not None:
+            filas_imagenes.append(len(data))
+            data.append([_fila_imagenes(f.ruta_base, f.ruta_actual), "", ""])
+
     anchos = [ANCHO_CONTENIDO_PT * f for f in (0.22, 0.16, 0.62)]
     t = Table(data, colWidths=anchos)
-    t.setStyle(TableStyle(_estilo_base_tabla(banda_colspan=3, filas=len(data))))
+    estilo = _estilo_base_tabla(banda_colspan=3, filas=len(data))
+    for fila_idx in filas_imagenes:
+        estilo.append(("SPAN", (0, fila_idx), (2, fila_idx)))
+        estilo.append(("BACKGROUND", (0, fila_idx), (2, fila_idx), colors.white))
+    t.setStyle(TableStyle(estilo))
     return t
 
 
@@ -379,7 +461,7 @@ def construir_pdf(cliente: str, fecha: date, servidores: list[ResumenServidor], 
         return doc
 
     def _armar_story() -> list:
-        story = [_tabla_resumen_servidores(servidores)]
+        story = [_tabla_resumen_servidores(cliente, servidores)]
         for i, s in enumerate(servidores_con_fallas):
             story.append(NextPageTemplate(f"detalle_{i}"))
             story.append(PageBreak())

@@ -29,10 +29,10 @@ SERVIDORES = [
         discos=[MontajeDisco("/", 76.0, "amarillo"), MontajeDisco("/data", 91.0, "rojo")],
         camaras_totales=11, camaras_ok=7,
         fallas=[
-            CamaraFalla("AD1l1", "rojo", "Confirmado por un humano: la cámara se movió"),
-            CamaraFalla("SP-TE01", "morado", "Desplazamiento por encima del umbral -- pendiente de revisión"),
-            CamaraFalla("ENT1-Op01", "amarillo", "NO CONCLUYENTE 3 días seguidos (lente sucio u obstruido)"),
-            CamaraFalla("B07", "rojo", "Servidor sin respuesta -- Puerto 80 Timed out [111]"),
+            CamaraFalla("AD1l1", "rojo", "Cámara movida (confirmado)", "Confirmado por un humano: la cámara se movió"),
+            CamaraFalla("SP-TE01", "morado", "Pendiente de revisión", "Desplazamiento por encima del umbral"),
+            CamaraFalla("ENT1-Op01", "amarillo", "No concluyente (3 días seguidos)", "Ningún método alcanza suficiente confianza"),
+            CamaraFalla("B07", "rojo", "Cámara sin respuesta", "Puerto 80 Timed out [111]"),
         ],
     ),
     # Servidor sin datos de monitoreo todavia (no esta en Monit_Servers_V2).
@@ -40,7 +40,7 @@ SERVIDORES = [
         nombre="QLYMSPROD05", planta="TOCANCIPA",
         cpu=None, gpu=None, discos=[],
         camaras_totales=9, camaras_ok=8,
-        fallas=[CamaraFalla("EVP", "rojo", "Servidor sin respuesta -- Puerto 80 Service Unavailable [503]")],
+        fallas=[CamaraFalla("EVP", "rojo", "Cámara sin respuesta", "Puerto 80 Service Unavailable [503]")],
     ),
 ]
 

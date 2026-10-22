@@ -13,6 +13,8 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 import monit_client
+from image_compare import CHECK_PLANTS_ROOT
+from image_compare import base_path as ruta_base_imagen
 from reporte_ejecutivo import CamaraFalla, ResumenServidor, construir_pdf
 
 load_dotenv()
@@ -24,29 +26,76 @@ REPORTES_ROOT = Path(os.environ["REPORTES_ROOT"])
 _DIAS_AMBAR_PARA_FALLA = 3
 
 
-def _clasificar_falla(fila: dict) -> CamaraFalla | None:
+def _rutas_imagenes(
+    cliente: str, planta: str, servidor: str, camara: str, fecha: date,
+) -> tuple[Path | None, Path | None]:
+    """`(ruta_base, ruta_actual)` para mostrar en el PDF (pedido 21/10/2026) -- `None` en
+    cualquiera de las dos si el archivo no existe (no detiene el reporte, solo omite las imágenes
+    de esa cámara)."""
+    base = ruta_base_imagen(cliente, planta, servidor, camara)
+    patron = f"{cliente}/*/{fecha:%d%m%y}/{planta}/{servidor}/{camara}.jpg"
+    actual = next(CHECK_PLANTS_ROOT.glob(patron), None)
+    return (base if base.exists() else None), actual
+
+
+def _etiqueta_sin_respuesta(log_motivo: str | None) -> tuple[str, str]:
+    """`(etiqueta, color)` según qué paso falló en el `.log` del servidor (ver `log_parse.py`) --
+    no todos los fallos son igual de graves (pedido 21/10/2026, tras ver `AD1p` con "Configuración
+    Unknow error [790]" y `AD1r2` con "Puerto 80 Timed out [111]" mostrando el mismo letrero
+    genérico, aunque uno sigue funcionando bien y el otro está totalmente caído):
+
+    - "Puerto 80 ..." -- no contestó en absoluto, ningún otro paso se intentó siquiera. El más grave.
+    - "Imagen IA ..." / "Imagen cámara ..." -- el puerto sí respondió, falló solo al traer la imagen.
+    - "Configuración ..." -- puerto e imagen bien, solo falló al traer la configuración -- la cámara
+      en sí está viva y capturando; se deja en ámbar, no rojo, porque es el menos grave de los tres.
+    - Cualquier otro texto no previsto -- "Error desconocido", en rojo (más vale no subestimarlo).
+    """
+    texto = log_motivo or ""
+    if texto.startswith("Puerto 80"):
+        return "Cámara sin respuesta", "rojo"
+    if texto.startswith("Imagen IA") or texto.startswith("Imagen cámara"):
+        return "Imagen no disponible", "rojo"
+    if texto.startswith("Configuración"):
+        return "Configuración no disponible", "amarillo"
+    return "Error desconocido", "rojo"
+
+
+def _clasificar_falla(fila: dict, cliente: str, planta: str, servidor: str, fecha: date) -> CamaraFalla | None:
     """Reglas acordadas (ROADMAP.md, Fase 4): 🔴 rojo y 🟣 morado siempre cuentan, igual que una
     cámara sin respuesta ese día (el `.log` del servidor, no la comparación, ver sección 3). 🟡
     ámbar solo cuenta desde el 3er día seguido. 🔵 base desactualizada NO cuenta -- ya es un estado
-    "en proceso", alguien ya lo marcó."""
+    "en proceso", alguien ya lo marcó.
+
+    "Estado" muestra una etiqueta descriptiva (no el color crudo) y "Motivo" el detalle técnico
+    puro, por separado (pedido 21/10/2026) -- antes venían concatenados en un solo texto. Las
+    cámaras sin respuesta no traen imágenes (no hay "actual" que capturar ese día); las demás sí,
+    incluido ámbar (ayuda a ver si es lente sucio/obstrucción).
+    """
     if fila["log_estado"] == "ERROR":
-        return CamaraFalla(fila["camara"], "rojo", f"Servidor sin respuesta -- {fila['log_motivo']}")
+        etiqueta, color = _etiqueta_sin_respuesta(fila["log_motivo"])
+        return CamaraFalla(fila["camara"], color, etiqueta, fila["log_motivo"] or "")
+
     if fila["estado_actual"] == "rojo":
+        ruta_base, ruta_actual = _rutas_imagenes(cliente, planta, servidor, fila["camara"], fecha)
         return CamaraFalla(
-            fila["camara"], "rojo", fila["imagen_motivo"] or "Confirmado: la cámara se movió",
+            fila["camara"], "rojo", "Cámara movida (confirmado)",
+            fila["imagen_motivo"] or "Confirmado por un humano", ruta_base, ruta_actual,
         )
     if fila["estado_actual"] == "morado":
+        ruta_base, ruta_actual = _rutas_imagenes(cliente, planta, servidor, fila["camara"], fecha)
         return CamaraFalla(
-            fila["camara"], "morado",
-            fila["imagen_motivo"] or "Desplazamiento por encima del umbral -- pendiente de revisión",
+            fila["camara"], "morado", "Pendiente de revisión",
+            fila["imagen_motivo"] or "Desplazamiento por encima del umbral", ruta_base, ruta_actual,
         )
     if (
         fila["estado_actual"] == "amarillo"
         and fila["dias_no_concluyente_consecutivos"] >= _DIAS_AMBAR_PARA_FALLA
     ):
+        dias = fila["dias_no_concluyente_consecutivos"]
+        ruta_base, ruta_actual = _rutas_imagenes(cliente, planta, servidor, fila["camara"], fecha)
         return CamaraFalla(
-            fila["camara"], "amarillo",
-            f"NO CONCLUYENTE {fila['dias_no_concluyente_consecutivos']} días seguidos",
+            fila["camara"], "amarillo", f"No concluyente ({dias} días seguidos)",
+            fila["imagen_motivo"] or "Ningún método alcanza suficiente confianza", ruta_base, ruta_actual,
         )
     return None
 
@@ -94,7 +143,10 @@ def _resumen_servidor(conn, cliente: str, planta: str, servidor: str, fecha: dat
         columnas = [d.name for d in cur.description]
         filas = [dict(zip(columnas, f)) for f in cur.fetchall()]
 
-    fallas = [f for f in (_clasificar_falla(fila) for fila in filas) if f is not None]
+    fallas = [
+        f for f in (_clasificar_falla(fila, cliente, planta, servidor, fecha) for fila in filas)
+        if f is not None
+    ]
     camaras_ok = sum(
         1 for fila in filas if fila["estado_actual"] == "verde" and fila["log_estado"] != "ERROR"
     )

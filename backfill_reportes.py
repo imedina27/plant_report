@@ -91,7 +91,10 @@ def main() -> None:
         por_cliente: dict[str, list[ResumenServidor]] = {}
         total_camaras_dia = total_fallas_dia = 0
         for (cliente, planta, servidor), filas in filas_por_servidor.items():
-            fallas = [f for f in (_clasificar_falla(f) for f in filas) if f is not None]
+            fallas = [
+                f for f in (_clasificar_falla(f, cliente, planta, servidor, fecha) for f in filas)
+                if f is not None
+            ]
             camaras_ok = sum(
                 1 for f in filas if f["estado_actual"] == "verde" and f["log_estado"] != "ERROR"
             )
