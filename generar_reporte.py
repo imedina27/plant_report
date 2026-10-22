@@ -53,7 +53,7 @@ def main() -> None:
     conn.close()
 
     if not rutas_generadas:
-        donde = f" para {args.client}" if args.client else ""
+        donde = f" para {args.client} (revisa el nombre, ej. AbInBev)" if args.client else ""
         print(f"No se encontraron datos en la base de datos para la fecha {date_str}{donde}.")
         return
 

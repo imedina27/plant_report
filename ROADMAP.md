@@ -1725,3 +1725,20 @@ explicar algo que los números solos no cuentan.
       que si Monit_Servers_V2 ya falló una vez en la corrida, no se reintenta 10s por cada servidor
       del reporte. Verificado repitiendo el comando real del usuario con la API sigue caída: ya no
       truena, genera el PDF con "Sin datos" en CPU/GPU/disco y envía el correo con normalidad.
+- [x] **Bug real: `--client` con mayúsculas distintas generaba un PDF vacío (22/10/2026)**: el
+      usuario corrió `generar_reporte.py --date h --client ABINBEV` (el cliente real está guardado
+      como `AbInBev`) y el PDF se generó sin problema aparente, pero completamente vacío -- sin
+      servidores ni cámaras. Causa: `datos_reporte.py` usa el valor de `--client` directo en
+      consultas SQL (`WHERE p.cliente = %s`), y Postgres compara texto **distinguiendo mayúsculas**
+      por defecto -- no había ninguna fila con `cliente = 'ABINBEV'`, así que la consulta no
+      encontraba nada, pero el código seguía adelante y escribía el PDF igual (con una lista de
+      servidores vacía) en vez de detectar que ese cliente no existe. (`main.py` no sufre esto
+      porque filtra por carpetas de archivos, y Windows resuelve rutas sin importar mayúsculas --
+      "funciona por accidente" ahí, pero la base de datos sí distingue.)
+      Corregido con `datos_reporte._resolver_cliente()`: busca el cliente con
+      `LOWER(p.cliente) = LOWER(%s)` y regresa el nombre real tal cual está guardado (`AbInBev`),
+      que es el que se usa después para la carpeta del PDF, el título, y las demás consultas.
+      `generar_reportes_del_dia()` ahora regresa `{}` (sin generar ningún PDF) si el cliente
+      realmente no existe para esa fecha, en vez de un PDF vacío -- `generar_reporte.py` ya tenía el
+      mensaje "No se encontraron datos..." para ese caso, solo le faltaba que la función de abajo
+      dejara de generar el PDF vacío antes de llegar ahí.

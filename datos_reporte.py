@@ -111,6 +111,24 @@ def _clientes_del_dia(conn, fecha: date) -> list[str]:
         return [fila[0] for fila in cur.fetchall()]
 
 
+def _resolver_cliente(conn, cliente: str, fecha: date) -> str | None:
+    """Encuentra el nombre del cliente tal cual está guardado en la base (mayúsculas/minúsculas
+    exactas), sin importar cómo lo haya escrito quien pasó `--client` -- `None` si ese cliente no
+    tiene ningún dato para esa fecha (pedido 22/10/2026: `--client ABINBEV` generaba un PDF vacío en
+    vez de encontrar `AbInBev`, porque Postgres compara texto distinguiendo mayúsculas)."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT DISTINCT p.cliente
+            FROM historial_comparacion h JOIN perfil_camara p ON p.id = h.camara_id
+            WHERE h.fecha = %s AND LOWER(p.cliente) = LOWER(%s)
+            """,
+            (fecha, cliente),
+        )
+        fila = cur.fetchone()
+        return fila[0] if fila else None
+
+
 def _servidores_del_cliente(conn, cliente: str, fecha: date) -> list[tuple[str, str]]:
     with conn.cursor() as cur:
         cur.execute(
@@ -177,9 +195,19 @@ def generar_reportes_del_dia(conn, fecha: date, cliente: str | None = None) -> d
     --client AbInBev` corrido el mismo día que ya hay otro cliente en la base de datos (de una
     corrida anterior ese día) terminaba generando -- y enviando -- el reporte de ese otro cliente
     también, porque esta función consultaba "qué clientes tienen datos hoy" sin filtrar (bug real,
-    detectado 21/10/2026: reenvió un correo de Api_Manzanillo sin haberlo pedido)."""
+    detectado 21/10/2026: reenvió un correo de Api_Manzanillo sin haberlo pedido).
+
+    Si `cliente` no coincide con ningún dato de esa fecha (typo, mayúsculas distintas, o un cliente
+    que de plano no se procesó ese día), regresa `{}` en vez de generar un PDF vacío (bug real,
+    detectado 22/10/2026 con `--client ABINBEV`)."""
     rutas: dict[str, Path] = {}
-    clientes = [cliente] if cliente is not None else _clientes_del_dia(conn, fecha)
+    if cliente is not None:
+        cliente_real = _resolver_cliente(conn, cliente, fecha)
+        if cliente_real is None:
+            return rutas
+        clientes = [cliente_real]
+    else:
+        clientes = _clientes_del_dia(conn, fecha)
     for cliente in clientes:
         servidores = [
             _resumen_servidor(conn, cliente, planta, servidor, fecha)
