@@ -1634,3 +1634,9 @@ explicar algo que los números solos no cuentan.
         las preguntas de consola (generar/enviar reporte) -- antes se quedaba abierta sin hacer nada
         mientras la terminal ya esperaba respuesta, y el usuario no se daba cuenta de que el
         programa estaba esperando su interacción (la ventana tapaba la terminal).
+- [x] **Bug visual corregido (22/10/2026)**: en el par de imágenes base/actual del detalle de
+      fallas, la imagen "Actual" se salía del recuadro derecho -- la celda combinada heredaba el
+      relleno (padding) de 6pt de la tabla exterior además de ya estar dimensionada al ancho
+      completo, así que terminaba 12pt más ancha que el espacio real disponible. Se le puso
+      `LEFTPADDING`/`RIGHTPADDING` en 0 a esa celda en vez de reservarle espacio. Verificado
+      regenerando el PDF real del 22/10/2026 (cámara `PV-OC03`, confirmada movida ese día).
