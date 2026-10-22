@@ -1668,3 +1668,11 @@ explicar algo que los números solos no cuentan.
       aplicaban ese mismo orden -- se armaban en el orden alfabético simple que trae la consulta SQL.
       Corregido en `reporte_ejecutivo.py::construir_pdf` ordenando `servidores_con_fallas` con la
       misma `_clave_orden_servidor` antes de generar las hojas de detalle.
+- [x] **Nuevo script `generar_reporte.py` (22/10/2026)**: pedido tras un caso real -- el usuario ya
+      había hecho la revisión de cámaras con `main.py`, pero no generó el PDF esa corrida. Volver a
+      correr `main.py` habría repetido toda la lectura/comparación (aunque las cámaras ya resueltas
+      no se vuelven a preguntar). Este script nuevo solo llama a `generar_reportes_del_dia` +
+      `enviar_reportes` contra lo que ya está en `perfil_camara`/`historial_comparacion`, sin tocar
+      la comparación ni la base de datos más que para leerla. Mismas banderas que `main.py`
+      (`--no-interaction`, `--client`, `--date`), mismo patrón de `-h`/`--help` en español. Launcher
+      gemelo `generar_reporte.ps1` agregado en `Documents/` junto a `plant_report.ps1`.

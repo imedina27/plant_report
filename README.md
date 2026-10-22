@@ -100,6 +100,7 @@ pipenv run python main.py --no-interaction --date h
 | Script | Para qué sirve |
 | --- | --- |
 | `migrate.py` | Aplica el esquema de base de datos (ver "Base de datos" arriba). |
+| `generar_reporte.py` | Genera (y pregunta si enviar) el reporte ejecutivo de una fecha que ya se procesó con `main.py`, sin repetir la comparación de cámaras ni la revisión humana -- usa lo que ya quedó guardado en la base de datos. Útil si esa corrida se hizo sin generar el reporte por error. Mismas banderas que `main.py`: `--no-interaction`, `--client`, `--date`. |
 | `bootstrap_config_base.py` | Llena de una sola vez las bases de configuración que falten, usando el `.json` más reciente disponible por cámara. No sobrescribe bases existentes. |
 | `bootstrap_image_base.py` | Igual que el anterior, pero para las bases de imagen. |
 | `backfill_reportes.py` | Vuelve a correr la comparación sobre un rango de fechas pasadas **sin tocar la base de datos** (ni enviar correos) — solo para revisar resultados sobre datos históricos. |
