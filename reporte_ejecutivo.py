@@ -388,6 +388,11 @@ def _tabla_fallas_servidor(servidor: ResumenServidor) -> Table:
     for fila_idx in filas_imagenes:
         estilo.append(("SPAN", (0, fila_idx), (2, fila_idx)))
         estilo.append(("BACKGROUND", (0, fila_idx), (2, fila_idx), colors.white))
+        # Sin esto, el LEFT/RIGHTPADDING de 6pt heredado de _estilo_base_tabla se suma al ancho
+        # completo con el que ya está armada _fila_imagenes(), y el borde derecho se sale del
+        # recuadro (bug real, visto en un PDF: la imagen "Actual" se salía del marco).
+        estilo.append(("LEFTPADDING", (0, fila_idx), (2, fila_idx), 0))
+        estilo.append(("RIGHTPADDING", (0, fila_idx), (2, fila_idx), 0))
     t.setStyle(TableStyle(estilo))
     return t
 
