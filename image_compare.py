@@ -203,35 +203,19 @@ def save_base(cliente: str, planta: str, servidor: str, camara: str, jpg_path: P
     shutil.copyfile(jpg_path, path)
 
 
-def _marcador_desactualizada(cliente: str, planta: str, servidor: str, camara: str) -> Path:
-    return base_path(cliente, planta, servidor, camara).with_suffix(".desactualizada")
-
-
-def marcar_base_desactualizada(cliente: str, planta: str, servidor: str, camara: str) -> None:
-    """Señala que esta base ya no sirve (ver ROADMAP.md, sección 2.8) sin tocar el .jpg.
-
-    No se sustituye de inmediato con la imagen que disparó el REVISAR porque, en el uso diario,
-    esa imagen casi siempre tiene un camión/montacargas en cuadro -- hornearla como base
-    contaminaría todas las comparaciones futuras. El reemplazo real se hace aparte, cuando
-    alguien tenga a mano una imagen limpia (ventana_bases.py o captura.py).
-    """
-    _marcador_desactualizada(cliente, planta, servidor, camara).touch()
-
-
-def base_desactualizada(cliente: str, planta: str, servidor: str, camara: str) -> bool:
-    return _marcador_desactualizada(cliente, planta, servidor, camara).exists()
-
-
-def limpiar_marcador_desactualizada(cliente: str, planta: str, servidor: str, camara: str) -> None:
-    _marcador_desactualizada(cliente, planta, servidor, camara).unlink(missing_ok=True)
-
-
 # ---------------------------------------------------------------------------
 # Orquestación por cámara
 # ---------------------------------------------------------------------------
 
-def compare_camera_image(jpg_path: Path, cliente: str, planta: str, servidor: str, camara: str) -> dict:
+def compare_camera_image(
+    jpg_path: Path, cliente: str, planta: str, servidor: str, camara: str,
+    base_desactualizada: bool = False,
+) -> dict:
     """Compara la imagen actual de una cámara contra su base, creándola si falta.
+
+    `base_desactualizada` viene de `perfil_camara.estado_actual` en la base de datos (ver
+    ROADMAP.md, secciones 2.8 y 3) -- este módulo ya no sabe nada de archivos marcadores, el
+    llamador decide si la base está marcada antes de pedir la comparación.
 
     status: "BASE CREADA" | "OK" | "REVISAR" | "NO CONCLUYENTE" | "RESOLUCION DISTINTA"
             | "BASE DESACTUALIZADA"
@@ -243,7 +227,7 @@ def compare_camera_image(jpg_path: Path, cliente: str, planta: str, servidor: st
                 "orb_inliers": None, "orb_desp": None, "fase_desp": None, "fase_conf": None,
                 "contenido_mean": None, "contenido_p95": None}
 
-    if base_desactualizada(cliente, planta, servidor, camara):
+    if base_desactualizada:
         return {"status": "BASE DESACTUALIZADA",
                 "motivo": "pendiente de que alguien suba una imagen limpia (ventana_bases.py)",
                 "orb_inliers": None, "orb_desp": None, "fase_desp": None, "fase_conf": None,

@@ -232,7 +232,14 @@ class VentanaRevision:
     # -- estado 2: revisar (bloquea hasta elegir un boton) ------------------
 
     def pedir_revision(self, titulo: str, diagnostico: str,
-                        ruta_base: Path, ruta_actual: Path) -> str:
+                        ruta_base: Path, ruta_actual: Path) -> tuple[str, str]:
+        """Regresa `(accion, observacion)` -- `observacion` es `""` si se dejó en blanco.
+
+        El campo de observación es el único punto de captura por ahora (ROADMAP.md, sección
+        "Observaciones por cámara"): una cámara que no pasa por esta ventana (ya confirmada en rojo,
+        o en ámbar) no tiene hoy forma de recibir una nota nueva -- se resolverá en el programa de
+        administración aparte que se construirá más adelante, fuera de este repo.
+        """
         t = self.theme
         self._limpiar_contenido()
         self._imgs_referencia.clear()
@@ -263,6 +270,15 @@ class VentanaRevision:
                  bg=t["frame_background"], fg=t["text"]).pack(pady=(4, 2))
         tk.Label(col_actual, image=img_actual, bg=t["frame_background"]).pack(padx=4, pady=(0, 4))
 
+        tk.Label(self.contenido, text="Observación (opcional)", font=(FUENTE, 10, "bold"),
+                 bg=t["background"], fg=t["tenue"]).pack(pady=(12, 2))
+        self._texto_observacion = tk.Text(
+            self.contenido, height=2, width=70, font=(FUENTE, 10), wrap="word",
+            bg=t["frame_background"], fg=t["text"], insertbackground=t["text"],
+            relief="flat", highlightbackground=t["border"], highlightthickness=1,
+        )
+        self._texto_observacion.pack()
+
         frame_botones = tk.Frame(self.contenido, bg=t["background"])
         frame_botones.pack(pady=16)
 
@@ -278,7 +294,8 @@ class VentanaRevision:
                   command=lambda: self._accion.set("desactualizada")).grid(row=0, column=2, padx=8)
 
         self.root.wait_variable(self._accion)
-        return self._accion.get()
+        observacion = self._texto_observacion.get("1.0", "end-1c").strip()
+        return self._accion.get(), observacion
 
     def _mostrar_frame_procesando(self) -> None:
         self.mostrar_procesando("esperando…", 0, 1)
@@ -320,8 +337,8 @@ if __name__ == "__main__":
                 f"ORB: {r['orb_inliers']} inliers, {r['orb_desp']:.1f} px      "
                 f"Correlación de fase: confianza {r['fase_conf']:.2f}, {r['fase_desp']:.1f} px"
             )
-            accion = ventana.pedir_revision(camara_id, diagnostico, ruta_base, ruta_actual)
-            print(f"{camara_id}: acción elegida = {accion}")
+            accion, observacion = ventana.pedir_revision(camara_id, diagnostico, ruta_base, ruta_actual)
+            print(f"{camara_id}: acción elegida = {accion}, observación = {observacion!r}")
 
     ventana.mostrar_procesando("Corrida completa", total, total)
     time.sleep(1.5)

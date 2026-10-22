@@ -10,10 +10,8 @@ Elegir un archivo no lo guarda de inmediato: se muestra junto a la base actual p
 se abrió la imagen correcta, y solo "Aceptar" la guarda como nueva base. Si no es la imagen
 correcta, "Seleccionar imagen..." se puede volver a oprimir sin haber guardado nada todavía.
 
-Fuente de la lista de pendientes: hoy escanea los marcadores `.desactualizada` en
-IMAGE_BASE_ROOT (ver `image_compare.py`). El día que exista `perfil_camara` en la base de datos
-(Fase 4), este es el único lugar que hay que cambiar para que la lista venga de ahí -- mismo
-patrón que `umbral_para()`.
+Fuente de la lista de pendientes: `perfil_camara.estado_actual = 'base_desactualizada'` en la base
+de datos (ver ROADMAP.md, secciones 2.8 y 3) -- ya no se escanean archivos marcadores en disco.
 """
 
 from __future__ import annotations
@@ -22,7 +20,8 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog
 
-from image_compare import IMAGE_BASE_ROOT, limpiar_marcador_desactualizada, save_base
+import db
+from image_compare import IMAGE_BASE_ROOT, save_base
 from ventana_revision import (
     ACENTO,
     DARK_THEME,
@@ -64,13 +63,11 @@ def _dialogo_info(parent: tk.Tk, theme: dict, oscuro: bool, titulo: str, mensaje
     ventana.wait_window()
 
 
-def _camaras_pendientes() -> list[tuple[str, str, str, str]]:
-    pendientes = []
-    for marcador in IMAGE_BASE_ROOT.glob("*/*/*/*.desactualizada"):
-        cliente, planta, servidor = marcador.relative_to(IMAGE_BASE_ROOT).parts[:3]
-        camara = marcador.stem
-        pendientes.append((cliente, planta, servidor, camara))
-    return sorted(pendientes)
+def _camaras_pendientes(conn) -> list[tuple[str, str, str, str]]:
+    return [
+        (fila["cliente"], fila["planta"], fila["servidor"], fila["camara"])
+        for fila in db.camaras_con_base_desactualizada(conn)
+    ]
 
 
 class VentanaBases:
@@ -84,6 +81,9 @@ class VentanaBases:
         self.root.configure(bg=t["background"])
         self.root.geometry("1180x640")
         _oscurecer_titlebar(self.root, self._oscuro)
+
+        self._conn = db.get_connection()
+        self.root.protocol("WM_DELETE_WINDOW", self._cerrar)
 
         self._img_base = None
         self._img_candidata = None
@@ -167,7 +167,7 @@ class VentanaBases:
         self.boton_aceptar.grid(row=0, column=1, padx=8)
 
     def _refrescar_lista(self) -> None:
-        self._pendientes = _camaras_pendientes()
+        self._pendientes = _camaras_pendientes(self._conn)
         self.lista.delete(0, "end")
         for cliente, planta, servidor, camara in self._pendientes:
             self.lista.insert("end", f"{cliente}/{planta}/{servidor}/{camara}")
@@ -227,13 +227,17 @@ class VentanaBases:
             return
         cliente, planta, servidor, camara = datos
         save_base(cliente, planta, servidor, camara, self._ruta_candidata)
-        limpiar_marcador_desactualizada(cliente, planta, servidor, camara)
+        db.marcar_base_reemplazada(self._conn, cliente, planta, servidor, camara)
         self._refrescar_lista()
         _dialogo_info(
             self.root, self.theme, self._oscuro, "Base actualizada",
             f"La imagen base de la cámara {cliente}/{planta}/{servidor}/{camara} "
             "fue cambiada con éxito.",
         )
+
+    def _cerrar(self) -> None:
+        self._conn.close()
+        self.root.destroy()
 
     def iniciar(self) -> None:
         self.root.mainloop()
