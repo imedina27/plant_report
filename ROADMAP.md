@@ -1662,3 +1662,9 @@ explicar algo que los números solos no cuentan.
         sale en inglés ("show this help message and exit"), sin importar el idioma del resto de la
         ayuda -- no hay forma de traducirlo mientras `ArgumentParser` lo agregue él solo. Corregido
         con `add_help=False` + un `-h`/`--help` agregado a mano con su propio texto en español.
+- [x] **Bug de orden corregido (22/10/2026)**: en el reporte PDF, la sección "RESUMEN DE SERVIDORES"
+      ya ordenaba los servidores de AbInBev correctamente (`_clave_orden_servidor`, por los últimos
+      dígitos del nombre), pero las hojas de detalle de cámaras con falla (una por servidor) no
+      aplicaban ese mismo orden -- se armaban en el orden alfabético simple que trae la consulta SQL.
+      Corregido en `reporte_ejecutivo.py::construir_pdf` ordenando `servidores_con_fallas` con la
+      misma `_clave_orden_servidor` antes de generar las hojas de detalle.

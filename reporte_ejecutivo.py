@@ -414,7 +414,12 @@ def construir_pdf(cliente: str, fecha: date, servidores: list[ResumenServidor], 
     desborda a una segunda hoja física, esa continuación repite el mismo encabezado (misma lógica
     que ReportLab ya usa para el pie: sigue aplicando el último `PageTemplate` activo hasta que
     aparezca un `NextPageTemplate` nuevo)."""
-    servidores_con_fallas = [s for s in servidores if s.fallas]
+    # Mismo orden que _tabla_resumen_servidores (incluye el caso especial de AbInBev) -- antes esta
+    # lista se quedaba en el orden alfabético simple de la consulta SQL, así que el resumen salía
+    # bien ordenado pero las hojas de detalle por servidor no (bug real, reportado 22/10/2026).
+    servidores_con_fallas = sorted(
+        (s for s in servidores if s.fallas), key=lambda s: _clave_orden_servidor(cliente, s.nombre),
+    )
 
     # Los dos encabezados tienen alturas distintas (1 fila vs. 2) y los dos pies también (el de la
     # hoja 1 trae además la línea de simbología) -- cada tipo de hoja necesita su propio alto de
