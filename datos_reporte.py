@@ -21,10 +21,6 @@ load_dotenv()
 
 REPORTES_ROOT = Path(os.environ["REPORTES_ROOT"])
 
-# Ámbar (NO CONCLUYENTE) solo cuenta como falla a partir del 3er día seguido (decidido en el
-# ROADMAP, sección 4) -- un día aislado puede ser lluvia en el lente, no amerita avisar a Gerencia.
-_DIAS_AMBAR_PARA_FALLA = 3
-
 
 def _rutas_imagenes(
     cliente: str, planta: str, servidor: str, camara: str, fecha: date,
@@ -61,15 +57,16 @@ def _etiqueta_sin_respuesta(log_motivo: str | None) -> tuple[str, str]:
 
 
 def _clasificar_falla(fila: dict, cliente: str, planta: str, servidor: str, fecha: date) -> CamaraFalla | None:
-    """Reglas acordadas (ROADMAP.md, Fase 4): 🔴 rojo y 🟣 morado siempre cuentan, igual que una
-    cámara sin respuesta ese día (el `.log` del servidor, no la comparación, ver sección 3). 🟡
-    ámbar solo cuenta desde el 3er día seguido. 🔵 base desactualizada NO cuenta -- ya es un estado
-    "en proceso", alguien ya lo marcó.
+    """Reglas acordadas (ROADMAP.md, Fase 4): 🔴 rojo, 🟣 morado y 🔵 base desactualizada siempre
+    cuentan, igual que una cámara sin respuesta ese día (el `.log` del servidor, no la comparación,
+    ver sección 3). 🟡 ámbar nunca llega aquí -- desde el 3er día seguido se convierte en morado
+    automáticamente (`db._siguiente_estado`), así que un ámbar visto en esta función siempre es de
+    1 o 2 días (ver `_resumen_servidor`, columna "No concluyente").
 
     "Estado" muestra una etiqueta descriptiva (no el color crudo) y "Motivo" el detalle técnico
     puro, por separado (pedido 21/10/2026) -- antes venían concatenados en un solo texto. Las
     cámaras sin respuesta no traen imágenes (no hay "actual" que capturar ese día); las demás sí,
-    incluido ámbar (ayuda a ver si es lente sucio/obstrucción).
+    incluida base desactualizada (ayuda a ver de un vistazo si de verdad hace falta reemplazarla).
     """
     if fila["log_estado"] == "ERROR":
         etiqueta, color = _etiqueta_sin_respuesta(fila["log_motivo"])
@@ -87,15 +84,15 @@ def _clasificar_falla(fila: dict, cliente: str, planta: str, servidor: str, fech
             fila["camara"], "morado", "Pendiente de revisión",
             fila["imagen_motivo"] or "Desplazamiento por encima del umbral", ruta_base, ruta_actual,
         )
-    if (
-        fila["estado_actual"] == "amarillo"
-        and fila["dias_no_concluyente_consecutivos"] >= _DIAS_AMBAR_PARA_FALLA
-    ):
-        dias = fila["dias_no_concluyente_consecutivos"]
+    if fila["estado_actual"] == "base_desactualizada":
+        # Antes no contaba como falla (era un estado "en proceso", ya marcado por un humano) --
+        # pedido 22/10/2026: ahora sí, para que la suma de las columnas del resumen cierre siempre
+        # contra "Cámaras totales" y no quede ninguna cámara invisible en el reporte.
         ruta_base, ruta_actual = _rutas_imagenes(cliente, planta, servidor, fila["camara"], fecha)
         return CamaraFalla(
-            fila["camara"], "amarillo", f"No concluyente ({dias} días seguidos)",
-            fila["imagen_motivo"] or "Ningún método alcanza suficiente confianza", ruta_base, ruta_actual,
+            fila["camara"], "base_desactualizada", "Base de imágenes desactualizada",
+            fila["imagen_motivo"] or "Pendiente de que alguien suba una imagen limpia (ventana_bases.py)",
+            ruta_base, ruta_actual,
         )
     return None
 
@@ -150,6 +147,12 @@ def _resumen_servidor(conn, cliente: str, planta: str, servidor: str, fecha: dat
     camaras_ok = sum(
         1 for fila in filas if fila["estado_actual"] == "verde" and fila["log_estado"] != "ERROR"
     )
+    # Ámbar de 1 o 2 días -- nunca llega al 3ro sin convertirse en morado (ver _siguiente_estado),
+    # así que no hace falta revisar "dias_no_concluyente_consecutivos" aquí (pedido 22/10/2026: antes
+    # estas cámaras no aparecían en ninguna columna del resumen, ni como OK ni como falla).
+    camaras_no_concluyentes = sum(
+        1 for fila in filas if fila["estado_actual"] == "amarillo" and fila["log_estado"] != "ERROR"
+    )
 
     temperaturas = monit_client.temperaturas_promedio_dia(servidor, fecha)
     discos = monit_client.uso_disco_actual(servidor)
@@ -159,7 +162,8 @@ def _resumen_servidor(conn, cliente: str, planta: str, servidor: str, fecha: dat
         cpu=temperaturas["cpu"] if temperaturas else None,
         gpu=temperaturas["gpu"] if temperaturas else None,
         discos=discos,
-        camaras_totales=len(filas), camaras_ok=camaras_ok, fallas=fallas,
+        camaras_totales=len(filas), camaras_ok=camaras_ok,
+        camaras_no_concluyentes=camaras_no_concluyentes, fallas=fallas,
     )
 
 

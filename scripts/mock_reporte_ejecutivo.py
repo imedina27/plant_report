@@ -20,18 +20,19 @@ SERVIDORES = [
         nombre="QLYMSPROD01", planta="ZACATECAS",
         cpu=MetricaServidor(52.3, "verde"), gpu=MetricaServidor(61.0, "verde"),
         discos=[MontajeDisco("/", 42.0, "verde"), MontajeDisco("/home", 55.0, "verde")],
-        camaras_totales=12, camaras_ok=12, fallas=[],
+        camaras_totales=12, camaras_ok=12, camaras_no_concluyentes=0, fallas=[],
     ),
-    # Servidor con fallas mixtas + disco en ambar y temperatura en rojo.
+    # Servidor con fallas mixtas + disco en ambar y temperatura en rojo. 6 OK + 1 no concluyente
+    # (ambar de 1-2 días, no cuenta como falla todavía) + 4 con falla = 11 totales.
     ResumenServidor(
         nombre="QLYMSPROD03", planta="APAN",
         cpu=MetricaServidor(88.4, "rojo"), gpu=MetricaServidor(69.2, "verde"),
         discos=[MontajeDisco("/", 76.0, "amarillo"), MontajeDisco("/data", 91.0, "rojo")],
-        camaras_totales=11, camaras_ok=7,
+        camaras_totales=11, camaras_ok=6, camaras_no_concluyentes=1,
         fallas=[
             CamaraFalla("AD1l1", "rojo", "Cámara movida (confirmado)", "Confirmado por un humano: la cámara se movió"),
             CamaraFalla("SP-TE01", "morado", "Pendiente de revisión", "Desplazamiento por encima del umbral"),
-            CamaraFalla("ENT1-Op01", "amarillo", "No concluyente (3 días seguidos)", "Ningún método alcanza suficiente confianza"),
+            CamaraFalla("ENT1-Op01", "base_desactualizada", "Base de imágenes desactualizada", "Pendiente de que alguien suba una imagen limpia (ventana_bases.py)"),
             CamaraFalla("B07", "rojo", "Cámara sin respuesta", "Puerto 80 Timed out [111]"),
         ],
     ),
@@ -39,7 +40,7 @@ SERVIDORES = [
     ResumenServidor(
         nombre="QLYMSPROD05", planta="TOCANCIPA",
         cpu=None, gpu=None, discos=[],
-        camaras_totales=9, camaras_ok=8,
+        camaras_totales=9, camaras_ok=8, camaras_no_concluyentes=0,
         fallas=[CamaraFalla("EVP", "rojo", "Cámara sin respuesta", "Puerto 80 Service Unavailable [503]")],
     ),
 ]

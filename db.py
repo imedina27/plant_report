@@ -51,8 +51,19 @@ def obtener_camara(conn: psycopg2.extensions.connection, cliente: str, planta: s
         return {"id": id_, "estado_actual": estado_actual, "dias_no_concluyente_consecutivos": dias}
 
 
-def _siguiente_estado(estado_actual: str, imagen_status: str | None, veredicto_humano: str | None) -> str:
-    """Máquina de estados del semáforo (ROADMAP.md, sección 2.7)."""
+DIAS_AMARILLO_PARA_REVISION = 3  # ver _siguiente_estado
+
+
+def _siguiente_estado(
+    estado_actual: str, imagen_status: str | None, veredicto_humano: str | None,
+    dias_no_concl_previo: int = 0,
+) -> str:
+    """Máquina de estados del semáforo (ROADMAP.md, sección 2.7).
+
+    Un ámbar (`NO CONCLUYENTE`) que lleva `DIAS_AMARILLO_PARA_REVISION` días seguidos pasa a morado
+    -- deja de ser "ninguno de los dos métodos está seguro" para convertirse en "alguien tiene que
+    decidir", igual que un `REVISAR` normal (pedido 22/10/2026: antes se quedaba en ámbar para
+    siempre si nunca llegaba a confirmarse como movimiento real, sin que ningún humano lo viera)."""
     if veredicto_humano == "bien":
         return "verde"
     if veredicto_humano == "mal":
@@ -70,7 +81,7 @@ def _siguiente_estado(estado_actual: str, imagen_status: str | None, veredicto_h
     if imagen_status == "REVISAR":
         return "morado"
     if imagen_status == "NO CONCLUYENTE":
-        return "amarillo"
+        return "morado" if dias_no_concl_previo + 1 >= DIAS_AMARILLO_PARA_REVISION else "amarillo"
     return estado_actual
 
 
@@ -92,8 +103,17 @@ def guardar_resultado(
     día, y si no, por qué) -- independiente de si Fase 1/2 encontraron algo que comparar.
     """
     imagen_status = imagen_result["status"] if imagen_result else None
-    nuevo_estado = _siguiente_estado(estado_actual_previo, imagen_status, veredicto_humano)
-    nuevo_dias = dias_no_concl_previo + 1 if imagen_status == "NO CONCLUYENTE" else 0
+    nuevo_estado = _siguiente_estado(estado_actual_previo, imagen_status, veredicto_humano, dias_no_concl_previo)
+    if imagen_status == "NO CONCLUYENTE":
+        nuevo_dias = dias_no_concl_previo + 1
+    elif imagen_status is None:
+        # Sin imagen que comparar ese día (ej. falla de conexión, ver log_parse.py) -- no hubo
+        # comparación real, así que la racha ni suma ni se reinicia (pedido 22/10/2026: antes se
+        # reiniciaba a 0, perdiendo días ya acumulados por pura mala suerte de conexión y retrasando
+        # sin motivo real que se forzara la revisión al 3er día).
+        nuevo_dias = dias_no_concl_previo
+    else:
+        nuevo_dias = 0
 
     with conn, conn.cursor() as cur:
         cur.execute(

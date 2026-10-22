@@ -66,9 +66,13 @@ VERDE = colors.HexColor("#2FA36B")
 AMBAR = colors.HexColor("#E0902E")
 ROJO = colors.HexColor("#D9534F")
 MORADO = colors.HexColor("#7E57C2")
+AZUL = colors.HexColor("#3B82C4")
 GRIS_VACIO = colors.HexColor("#C8C8CD")  # "sin datos", no un error
 
-_COLOR_ESTADO = {"verde": VERDE, "amarillo": AMBAR, "ambar": AMBAR, "rojo": ROJO, "morado": MORADO}
+_COLOR_ESTADO = {
+    "verde": VERDE, "amarillo": AMBAR, "ambar": AMBAR, "rojo": ROJO, "morado": MORADO,
+    "base_desactualizada": AZUL,
+}
 
 _ESTILO_ETQ = ParagraphStyle(
     "etq", fontName="Helvetica-Bold", fontSize=8, textColor=NEGRO, alignment=TA_CENTER,
@@ -110,7 +114,8 @@ class MontajeDisco:
 @dataclass
 class CamaraFalla:
     camara: str
-    estado: str  # "morado" | "rojo" | "amarillo" (ámbar solo llega aquí si ya es 3+ días seguidos) -- color de la celda
+    estado: str  # "morado" | "rojo" | "base_desactualizada" -- color de la celda (el ámbar ya no
+    # llega aquí: desde el 3er día seguido se convierte en morado, ver db._siguiente_estado)
     etiqueta: str  # texto que se muestra en "Estado" (ej. "Cámara sin respuesta") -- descriptivo, no el color crudo
     motivo: str  # detalle técnico puro (ej. "Puerto 80 Timed out [111]")
     ruta_base: Path | None = None  # None = sin imagen que mostrar (ej. cámara sin respuesta ese día)
@@ -126,6 +131,7 @@ class ResumenServidor:
     discos: list[MontajeDisco]
     camaras_totales: int
     camaras_ok: int
+    camaras_no_concluyentes: int  # ámbar de 1-2 días -- al 3ro pasa a "fallas" (ver datos_reporte.py)
     fallas: list[CamaraFalla] = field(default_factory=list)
 
 
@@ -223,9 +229,10 @@ def _tabla_pie(cliente: str, num_hoja: int, total_hojas: int) -> Table:
 
 _SIMBOLOGIA = [
     (VERDE, "OK"),
-    (AMBAR, "No concluyente (3+ días) / configuración no disponible"),
+    (AMBAR, "No concluyente (1-2 días) / configuración no disponible"),
     (ROJO, "Falla confirmada / cámara o imagen sin respuesta"),
     (MORADO, "Pendiente de revisión"),
+    (AZUL, "Base de imágenes desactualizada"),
     (GRIS, "Sin datos de monitoreo"),
 ]
 _ESTILO_SIMBOLOGIA = ParagraphStyle(
@@ -321,7 +328,7 @@ def _fila_imagenes(ruta_base: Path, ruta_actual: Path) -> Table:
     return t
 
 
-_ANCHO_COL_DISCOS_PT = ANCHO_CONTENIDO_PT * 0.20
+_ANCHO_COL_DISCOS_PT = ANCHO_CONTENIDO_PT * 0.18
 
 
 def _clave_orden_servidor(cliente: str, nombre: str) -> tuple:
@@ -341,12 +348,14 @@ def _tabla_resumen_servidores(cliente: str, servidores: list[ResumenServidor]) -
     servidores = sorted(servidores, key=lambda s: _clave_orden_servidor(cliente, s.nombre))
     encabezados = [
         _p(t, _ESTILO_ETQ) for t in
-        ["Servidor", "CPU", "GPU", "Disco(s)", "Cámaras\ntotales", "Cámaras\nOK", "Cámaras\ncon falla"]
+        ["Servidor", "CPU", "GPU", "Disco(s)", "Cámaras\ntotales", "Cámaras\nOK",
+         "No\nconcluyente", "Cámaras\ncon falla"]
     ]
-    data = [[_p("RESUMEN DE SERVIDORES", _ESTILO_BANDA)] + [""] * 6, encabezados]
+    data = [[_p("RESUMEN DE SERVIDORES", _ESTILO_BANDA)] + [""] * 7, encabezados]
     for s in servidores:
         n_fallas = len(s.fallas)
         color_fallas = ROJO if n_fallas else VERDE
+        color_no_concl = AMBAR if s.camaras_no_concluyentes else NEGRO
         data.append([
             _p(f"{s.nombre}<br/><font size=7 color='#8A8A92'>{s.planta}</font>", _ESTILO_VAL),
             _texto_metrica(s.cpu),
@@ -354,11 +363,12 @@ def _tabla_resumen_servidores(cliente: str, servidores: list[ResumenServidor]) -
             _texto_discos(s.discos, _ANCHO_COL_DISCOS_PT - 12),  # -12: el LEFT/RIGHTPADDING de la celda
             _celda_estado(str(s.camaras_totales)),
             _celda_estado(str(s.camaras_ok), VERDE),
+            _celda_estado(str(s.camaras_no_concluyentes), color_no_concl),
             _celda_estado(str(n_fallas), color_fallas),
         ])
-    anchos = [ANCHO_CONTENIDO_PT * f for f in (0.22, 0.13, 0.13, 0.20, 0.10, 0.10, 0.12)]
+    anchos = [ANCHO_CONTENIDO_PT * f for f in (0.19, 0.11, 0.11, 0.18, 0.09, 0.09, 0.11, 0.12)]
     t = Table(data, colWidths=anchos)
-    t.setStyle(TableStyle(_estilo_base_tabla(banda_colspan=7, filas=len(data))))
+    t.setStyle(TableStyle(_estilo_base_tabla(banda_colspan=8, filas=len(data))))
     return t
 
 

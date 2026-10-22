@@ -62,10 +62,10 @@ falló por completo según el `.log` del servidor):
    VIVOTEK, DAHUA).
 2. Compara su `.jpg` contra `IMAGE_BASE_ROOT` (dos señales: features/homografía + correlación de
    fase).
-3. Si la imagen da `REVISAR`, abre una ventana para que un humano confirme si la cámara se movió de
-   verdad, si es un falso positivo, o si hay que marcar la base como desactualizada (ver
-   `ventana_bases.py` abajo) — a menos que ya esté confirmada como movida de un día anterior, en
-   cuyo caso no se vuelve a preguntar.
+3. Si la imagen da `REVISAR` -- o si da `NO CONCLUYENTE` tres días seguidos -- abre una ventana para
+   que un humano confirme si la cámara se movió de verdad, si es un falso positivo, o si hay que
+   marcar la base como desactualizada (ver `ventana_bases.py` abajo) — a menos que ya esté
+   confirmada como movida de un día anterior, en cuyo caso no se vuelve a preguntar.
 4. Guarda el resultado en PostgreSQL (cámara por cámara, justo después de resolverla).
 
 Al terminar, pregunta si generar el reporte ejecutivo y si enviarlo por correo.

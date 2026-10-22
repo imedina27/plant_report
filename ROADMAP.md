@@ -1676,3 +1676,37 @@ explicar algo que los números solos no cuentan.
       la comparación ni la base de datos más que para leerla. Mismas banderas que `main.py`
       (`--no-interaction`, `--client`, `--date`), mismo patrón de `-h`/`--help` en español. Launcher
       gemelo `generar_reporte.ps1` agregado en `Documents/` junto a `plant_report.ps1`.
+- [x] **Duda real que destapó dos huecos del reporte (22/10/2026)**: el usuario notó que en
+      `QLYMSPROD01` las "Cámaras totales" (40) no coincidían con "Cámaras OK" (31) + "Cámaras con
+      falla" (0) -- faltaban 9. Al investigar, eran cámaras en ámbar con solo 1 día de racha (el
+      ámbar nunca contaba como falla hasta el 3er día seguido, pero tampoco contaba como OK) --
+      invisibles en el resumen del PDF sin que nada estuviera mal en los datos. Esto llevó a repasar
+      **todo** el inventario de estados posibles (`db._siguiente_estado`, estatus de
+      `image_compare.py`, el `.log` del servidor) y a dos decisiones de diseño:
+      1. **El ámbar ya no se queda esperando para siempre.** Antes, `NO CONCLUYENTE` solo acumulaba
+         días (`dias_no_concluyente_consecutivos`) para que el *reporte* lo contara como falla desde
+         el 3er día -- pero nunca abría la ventana de revisión, así que una cámara podía quedarse en
+         ámbar indefinidamente sin que ningún humano la viera jamás. Ahora, `db._siguiente_estado`
+         pasa la cámara a **morado** al llegar a `DIAS_AMARILLO_PARA_REVISION = 3` días seguidos
+         -- exactamente igual que un `REVISAR` normal -- y `main.py` fuerza la apertura de la
+         ventana de revisión ese mismo día (`fuerza_revision`), obligando a un humano a contestar
+         Bien/Mal/Base desactualizada. `datos_reporte.py` ya no necesita la regla "ámbar cuenta
+         desde el 3er día" -- nunca llega tan lejos sin convertirse en morado.
+      2. **El contador de racha ya no se reinicia por una falla de conexión.** Se encontró de paso:
+         si una cámara llevaba 2 días seguidos en ámbar y al 3er día tenía una falla de conexión
+         (sin `.jpg` ese día), el contador se reiniciaba a 0 en vez de mantenerse -- retrasando sin
+         motivo que se forzara la revisión. Ahora `db.guardar_resultado` congela la racha (ni suma
+         ni reinicia) los días sin imagen que comparar, y solo la reinicia a 0 cuando sí hay una
+         comparación real que no fue `NO CONCLUYENTE`.
+      3. **Nueva columna "No concluyente"** en el resumen del PDF (`reporte_ejecutivo.py`), entre
+         "Cámaras OK" y "Cámaras con falla" -- cuenta el ámbar de 1-2 días (ya nunca llega a 3 sin
+         convertirse en morado). En ámbar si hay alguna, negro si es 0.
+      4. **"Base desactualizada" ahora sí cuenta como falla** (decisión explícita del usuario, pedido
+         22/10/2026 -- antes era un estado "en proceso" que no sumaba en ningún lado). Aparece en
+         "Cámaras con falla" con la etiqueta "Base de imágenes desactualizada", color azul nuevo
+         (`AZUL`) tanto en la celda de estado como en la simbología del pie de la hoja 1. Con esto,
+         la suma de OK + No concluyente + Con falla siempre cierra contra "Cámaras totales" -- ya no
+         queda ninguna cámara invisible en el resumen.
+      Verificado contra la base de datos real del 22/10/2026: las 11 filas de servidores de AbInBev
+      reconciliaron exactamente (`camaras_ok + camaras_no_concluyentes + len(fallas) ==
+      camaras_totales` en los 11 casos), y `QLYMSPROD01` pasó de mostrar 40/31/0 a 40/31/9/0.

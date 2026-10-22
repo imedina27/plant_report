@@ -144,7 +144,11 @@ def main() -> None:
             detalle = f" ({imagen_result['motivo']})" if imagen_result["motivo"] else ""
             partes.append(f"imagen: {imagen_result['status']}{detalle}")
 
-            if imagen_result["status"] == "REVISAR" and ventana is not None:
+            fuerza_revision = (
+                imagen_result["status"] == "NO CONCLUYENTE"
+                and perfil["dias_no_concluyente_consecutivos"] + 1 >= db.DIAS_AMARILLO_PARA_REVISION
+            )
+            if (imagen_result["status"] == "REVISAR" or fuerza_revision) and ventana is not None:
                 if perfil["estado_actual"] == "rojo":
                     # Incidencia ya confirmada -- no se vuelve a preguntar (ROADMAP.md, sección 2.7)
                     partes.append("incidencia ya confirmada, sigue abierta")
