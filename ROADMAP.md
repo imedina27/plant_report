@@ -1658,3 +1658,7 @@ explicar algo que los números solos no cuentan.
       resto de los mensajes/comentarios del proyecto se quedan en español. `--sin-interaccion` →
       `--no-interaction`, `--cliente` → `--client`, `--fecha` → `--date`. Actualizado también en
       `plant_report.ps1` (vive en `Documents/`, fuera de este repo) y en `README.md`.
+      - **Detalle encontrado al renombrarlas**: el `-h`/`--help` que agrega `argparse` solo siempre
+        sale en inglés ("show this help message and exit"), sin importar el idioma del resto de la
+        ayuda -- no hay forma de traducirlo mientras `ArgumentParser` lo agregue él solo. Corregido
+        con `add_help=False` + un `-h`/`--help` agregado a mano con su propio texto en español.
