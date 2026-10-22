@@ -73,6 +73,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Compara la configuración e imagen de cada cámara contra su base, y genera "
         "el reporte ejecutivo del día (ROADMAP.md).",
+        add_help=False,  # -h/--help se agrega abajo a mano, para que su ayuda salga en español
+        # (el "-h" que agrega ArgumentParser solo no se puede traducir, siempre sale en inglés).
+    )
+    parser.add_argument(
+        "-h", "--help", action="help", default=argparse.SUPPRESS,
+        help="Muestra este mensaje de ayuda y termina.",
     )
     parser.add_argument(
         "--no-interaction", action="store_true",
