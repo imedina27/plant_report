@@ -183,7 +183,7 @@ def generar_reportes_del_dia(conn, fecha: date, cliente: str | None = None) -> d
         ]
         carpeta_cliente = REPORTES_ROOT / cliente
         carpeta_cliente.mkdir(parents=True, exist_ok=True)
-        ruta = carpeta_cliente / f"{fecha:%Y%m%d}_{cliente}.pdf"
+        ruta = carpeta_cliente / f"{fecha:%d%m%Y}_{cliente}.pdf"
         construir_pdf(cliente, fecha, servidores, ruta)
         rutas[cliente] = ruta
     return rutas

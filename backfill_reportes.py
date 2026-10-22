@@ -113,7 +113,7 @@ def main() -> None:
         for cliente, servidores in por_cliente.items():
             carpeta = SALIDA_ROOT / cliente
             carpeta.mkdir(parents=True, exist_ok=True)
-            construir_pdf(cliente, fecha, servidores, carpeta / f"{fecha:%Y%m%d}_{cliente}.pdf")
+            construir_pdf(cliente, fecha, servidores, carpeta / f"{fecha:%d%m%Y}_{cliente}.pdf")
 
         resumen_por_dia.append((fecha, total_camaras_dia, total_fallas_dia))
         print(f"{fecha:%d/%m/%Y}: {total_camaras_dia} cámaras, {total_fallas_dia} con falla"

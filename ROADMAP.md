@@ -1287,8 +1287,10 @@ flowchart TD
      (cliente HTTP de solo lectura hacia la API de Monit_Servers_V2), `datos_reporte.py` (arma los
      `ResumenServidor` consultando `perfil_camara`/`historial_comparacion` + `monit_client.py`, y
      dispara `construir_pdf()` una vez por cliente). Variable de entorno nueva: `MONIT_API_URL`.
-     Salida (decidido 21/10/2026, configurable): `REPORTES_ROOT/<Cliente>/<YYYYMMDD>_<Cliente>.pdf`
-     -- `REPORTES_ROOT` es variable de entorno nueva, mismo patrón que `CHECK_PLANTS_ROOT`/
+     Salida (decidido 21/10/2026, configurable): `REPORTES_ROOT/<Cliente>/<DDMMYYYY>_<Cliente>.pdf`
+     (formato de fecha corregido 22/10/2026 -- día primero, no año, para que se lea bien de un
+     vistazo en el explorador de archivos) -- `REPORTES_ROOT` es variable de entorno nueva, mismo
+     patrón que `CHECK_PLANTS_ROOT`/
      `IMAGE_BASE_ROOT`/`CONFIG_BASE_ROOT`.
    - Probado end-to-end contra datos reales de producción (BD + API viva de Monit_Servers_V2,
      fecha 02/10/2026 del sandbox): 3 PDFs generados (AbInBev 12 hojas, Api_Manzanillo, Pemex),
@@ -1617,8 +1619,18 @@ explicar algo que los números solos no cuentan.
       cámaras AbInBev + Api_Manzanillo encontradas, Pemex/C5i_Colima sin datos ese día, ver nota en
       "Estructura de datos"). Confirmado: persistencia real en Postgres (265 filas en
       `perfil_camara`/`historial_comparacion`, todas en verde), generación del PDF y la pregunta de
-      correo respetando "no" sin enviar nada. Pendiente real, no simulado: ninguna cámara dio
-      `REVISAR` ese día, así que **la ventana de revisión (`ventana_revision.py`) con un humano
-      dándole clic contra la base de datos real sigue sin probarse de principio a fin** -- en cuanto
-      aparezca una cámara en morado/rojo en una corrida real, vale la pena confirmar que el flujo
-      completo (observación incluida) funciona igual de bien que en las pruebas aisladas.
+      correo respetando "no" sin enviar nada.
+- [x] **Ventana de revisión validada en vivo contra la BD real (22/10/2026)** — el usuario corrió
+      `main.py` solo (sin mí presente) y resolvió 8 cámaras `REVISAR` de verdad: 7 "Bien" (volvieron
+      a verde, confirmado que ya no aparecen como falla al día siguiente) y 1 "Mal"
+      (`Api_Manzanillo/API-MANZANILLO/APIMAN-FASE1/PV-OC03`, quedó en rojo, aparece en el PDF como
+      "Cámara movida (confirmado)" con sus dos imágenes y la cuadrícula). Cierra el pendiente que
+      quedó anotado el día anterior. También contestó "sí" a enviar correo -- llegó sin problema.
+      Ninguna de las 8 llevó observación escrita (opcional, no es un problema).
+- [x] **Dos ajustes pedidos tras revisar esa corrida (22/10/2026)**:
+      - Formato de fecha en el nombre del PDF corregido a `DDMMYYYY` (antes `YYYYMMDD` -- se
+        esperaba ver el día primero, no el año, al ojearlo en el explorador de archivos).
+      - La ventana de revisión se cierra apenas termina de procesar todas las cámaras, **antes** de
+        las preguntas de consola (generar/enviar reporte) -- antes se quedaba abierta sin hacer nada
+        mientras la terminal ya esperaba respuesta, y el usuario no se daba cuenta de que el
+        programa estaba esperando su interacción (la ventana tapaba la terminal).

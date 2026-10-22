@@ -172,6 +172,14 @@ def main() -> None:
 
         print("  - " + "  |  ".join(partes))
 
+    if ventana is not None:
+        # Se cierra aquí, no al final -- lo que sigue (generar/enviar reporte) se contesta desde la
+        # terminal, y dejar la ventana abierta sin hacer nada hacía pensar al usuario que seguía
+        # procesando, tapando la terminal que en realidad ya estaba esperando su respuesta.
+        ventana.mostrar_procesando("Corrida completa", total, total)
+        time.sleep(1.0)
+        ventana.cerrar()
+
     generar = args.sin_interaccion or input(
         "¿Generar el reporte ejecutivo de esta corrida? (s/n): "
     ).strip().lower().startswith("s")
@@ -196,11 +204,6 @@ def main() -> None:
             print("Envío de correos omitido por el usuario.")
 
     conn.close()
-
-    if ventana is not None:
-        ventana.mostrar_procesando("Corrida completa", total, total)
-        time.sleep(1.0)
-        ventana.cerrar()
 
 
 if __name__ == "__main__":
