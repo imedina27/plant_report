@@ -1321,6 +1321,13 @@ flowchart TD
      no se le mande nada (ej. `C5i_Colima`, sin correr todavía), se le pone el valor literal
      `NINGUNO` (sin importar mayúsculas/espacios) -- `correo.enviar_reportes()` lo reporta como
      "omitido" en vez de como una falla, y ni siquiera abre el PDF de ese cliente.
+   - **Bug encontrado y corregido el mismo día**: el sentinel solo se revisaba sobre la variable
+     específica del cliente, no sobre el valor ya resuelto. Si se ponía
+     `REPORTE_DESTINATARIOS_DEFAULT=NINGUNO`, un cliente sin variable propia terminaba con
+     `["NINGUNO"]` como destinatario -- intentaba mandarle un correo real a la dirección literal
+     "NINGUNO", que fallaba en el envío (se reportaba como `FALLÓ`, no como "omitido"). Corregido:
+     el sentinel se revisa sobre el valor final (venga de la variable específica o del default), no
+     solo sobre la específica.
    - **Decidido — SMTP**: Google Workspace (`imedina@quantumlabs.ai`) vía `smtp.gmail.com:587` +
      STARTTLS, con **App Password** (no la contraseña normal de la cuenta -- requiere verificación
      en 2 pasos activada). Cuenta y contraseña en `.env` (`SMTP_USER`/`SMTP_APP_PASSWORD`), nunca en

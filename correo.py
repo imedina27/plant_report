@@ -59,14 +59,14 @@ _SENTINEL_NO_ENVIAR = "NINGUNO"
 
 def _destinatarios(cliente: str) -> list[str] | None:
     """`REPORTE_DESTINATARIOS_<CLIENTE>` (nombre normalizado a mayúsculas); si no existe o está
-    vacía, cae a `REPORTE_DESTINATARIOS_DEFAULT`. Regresa `None` si ese cliente está configurado a
-    propósito como `NINGUNO` (no enviarle correo); `[]` si de plano no hay a quién enviarle (ni
-    específico ni default -- probablemente falta configurar)."""
+    vacía, cae a `REPORTE_DESTINATARIOS_DEFAULT`. Regresa `None` si el valor que terminó aplicando
+    -- específico o default, cualquiera de los dos -- es `NINGUNO` (no enviarle correo a propósito);
+    `[]` si de plano no hay a quién enviarle (ni específico ni default -- probablemente falta
+    configurar)."""
     clave = f"REPORTE_DESTINATARIOS_{cliente.upper()}"
-    valor_especifico = os.environ.get(clave)
-    if valor_especifico and valor_especifico.strip().upper() == _SENTINEL_NO_ENVIAR:
+    valor = os.environ.get(clave) or os.environ.get("REPORTE_DESTINATARIOS_DEFAULT")
+    if valor and valor.strip().upper() == _SENTINEL_NO_ENVIAR:
         return None
-    valor = valor_especifico or os.environ.get("REPORTE_DESTINATARIOS_DEFAULT")
     if not valor:
         return []
     return [correo.strip() for correo in valor.split(",") if correo.strip()]
