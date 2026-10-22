@@ -1315,6 +1315,12 @@ flowchart TD
      `REPORTE_DESTINATARIOS_DEFAULT` como respaldo si un cliente nuevo todavía no tiene su propia
      variable — así nunca se queda sin enviar nada por simple falta de configuración. Por ahora
      todos apuntan a los mismos 2 correos (`imedina@quantumlabs.ai`, `imkuri@yahoo.com`).
+   - **Decidido (22/10/2026) — valor especial `NINGUNO`**: dejar `REPORTE_DESTINATARIOS_<CLIENTE>`
+     vacío **no** evita el envío -- un string vacío también cuenta como "no configurado" y cae al
+     default (confusión real reportada por el usuario). Para que a un cliente específico de verdad
+     no se le mande nada (ej. `C5i_Colima`, sin correr todavía), se le pone el valor literal
+     `NINGUNO` (sin importar mayúsculas/espacios) -- `correo.enviar_reportes()` lo reporta como
+     "omitido" en vez de como una falla, y ni siquiera abre el PDF de ese cliente.
    - **Decidido — SMTP**: Google Workspace (`imedina@quantumlabs.ai`) vía `smtp.gmail.com:587` +
      STARTTLS, con **App Password** (no la contraseña normal de la cuenta -- requiere verificación
      en 2 pasos activada). Cuenta y contraseña en `.env` (`SMTP_USER`/`SMTP_APP_PASSWORD`), nunca en

@@ -47,7 +47,7 @@ copy .env.example .env
 | `REPORTE_ASUNTO` | Plantilla del asunto del correo, con `[Cliente]` como placeholder. |
 | `REPORTE_CUERPO` | Plantilla del cuerpo del correo (texto plano, se arma como HTML con la firma de Quantum Labs debajo), con `[cliente]` como placeholder. |
 | `REPORTE_DESTINATARIOS_DEFAULT` | Destinatarios (separados por coma) que se usan si un cliente no tiene su propia variable. |
-| `REPORTE_DESTINATARIOS_<CLIENTE>` | Destinatarios específicos de un cliente (nombre normalizado a mayúsculas, ej. `REPORTE_DESTINATARIOS_API_MANZANILLO`). Opcional — sin esto, ese cliente usa el default. |
+| `REPORTE_DESTINATARIOS_<CLIENTE>` | Destinatarios específicos de un cliente (nombre normalizado a mayúsculas, ej. `REPORTE_DESTINATARIOS_API_MANZANILLO`). Opcional — sin esto (o si se deja vacío), ese cliente usa el default. Para que a un cliente específico no se le envíe nada, usa el valor `NINGUNO` (no sirve dejarlo vacío, eso cae al default igual). |
 
 ## Uso diario
 

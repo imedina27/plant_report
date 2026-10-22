@@ -51,11 +51,22 @@ _FIRMA_HTML = """
 """
 
 
-def _destinatarios(cliente: str) -> list[str]:
-    """`REPORTE_DESTINATARIOS_<CLIENTE>` (nombre normalizado a mayúsculas); si no existe, cae a
-    `REPORTE_DESTINATARIOS_DEFAULT`. `[]` si ninguno de los dos está configurado."""
+# Valor especial para REPORTE_DESTINATARIOS_<CLIENTE>: a diferencia de dejar la variable vacía o
+# sin poner (que cae al default -- un string vacío es "falso" en Python, así que no se puede
+# distinguir de "no configurado"), esto SÍ significa "a este cliente no le mandes nada, a propósito".
+_SENTINEL_NO_ENVIAR = "NINGUNO"
+
+
+def _destinatarios(cliente: str) -> list[str] | None:
+    """`REPORTE_DESTINATARIOS_<CLIENTE>` (nombre normalizado a mayúsculas); si no existe o está
+    vacía, cae a `REPORTE_DESTINATARIOS_DEFAULT`. Regresa `None` si ese cliente está configurado a
+    propósito como `NINGUNO` (no enviarle correo); `[]` si de plano no hay a quién enviarle (ni
+    específico ni default -- probablemente falta configurar)."""
     clave = f"REPORTE_DESTINATARIOS_{cliente.upper()}"
-    valor = os.environ.get(clave) or os.environ.get("REPORTE_DESTINATARIOS_DEFAULT")
+    valor_especifico = os.environ.get(clave)
+    if valor_especifico and valor_especifico.strip().upper() == _SENTINEL_NO_ENVIAR:
+        return None
+    valor = valor_especifico or os.environ.get("REPORTE_DESTINATARIOS_DEFAULT")
     if not valor:
         return []
     return [correo.strip() for correo in valor.split(",") if correo.strip()]
@@ -111,10 +122,14 @@ def _enviar_con_reintentos(destinatarios: list[str], msg: MIMEMultipart) -> tupl
 def enviar_reportes(rutas_por_cliente: dict[str, Path]) -> list[tuple[str, bool, str | None]]:
     """Un correo por cliente (PDF de `rutas_por_cliente[cliente]` adjunto, todos sus destinatarios
     juntos en "Para"). No se detiene si uno falla -- sigue con los demás clientes. Regresa
-    `[(cliente, éxito, motivo_si_falló), ...]`."""
+    `[(cliente, éxito, motivo), ...]` -- `motivo` es `None` en un envío normal exitoso, el texto del
+    error si falló, o la razón si se omitió a propósito (`NINGUNO`)."""
     resultados = []
     for cliente, ruta_pdf in rutas_por_cliente.items():
         destinatarios = _destinatarios(cliente)
+        if destinatarios is None:
+            resultados.append((cliente, True, "omitido -- configurado como NINGUNO"))
+            continue
         if not destinatarios:
             resultados.append((cliente, False, "sin destinatarios configurados"))
             continue

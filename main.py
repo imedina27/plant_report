@@ -199,7 +199,10 @@ def main() -> None:
         if enviar:
             print("Enviando correos...")
             for cliente, exito, motivo in enviar_reportes(rutas_generadas):
-                print(f"  - {cliente}: enviado" if exito else f"  - {cliente}: FALLÓ ({motivo})")
+                if exito:
+                    print(f"  - {cliente}: enviado" if motivo is None else f"  - {cliente}: {motivo}")
+                else:
+                    print(f"  - {cliente}: FALLÓ ({motivo})")
         else:
             print("Envío de correos omitido por el usuario.")
 
