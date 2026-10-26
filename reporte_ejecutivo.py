@@ -40,7 +40,7 @@ from reportlab.platypus import (
     TableStyle,
 )
 
-from ventana_revision import _con_cuadricula
+from ventana_revision import _abrir_imagen_segura, _con_cuadricula
 
 LOGO = Path(__file__).parent / "assets" / "QuantumLab-Logo-01.png"
 
@@ -296,10 +296,17 @@ def _texto_discos(discos: list[MontajeDisco], ancho_pt: float) -> Table | Paragr
     return t
 
 
-def _imagen_proporcional(path: Path, ancho_pt: float) -> Image:
+def _imagen_proporcional(path: Path, ancho_pt: float) -> Image | None:
     """Carga la imagen con la misma cuadrícula guía que `ventana_revision.py` (ayuda a juzgar a
-    ojo si la cámara se movió), con la proporción real del archivo -- nunca un ratio fijo a ojo."""
-    img = _con_cuadricula(PILImage.open(path))
+    ojo si la cámara se movió), con la proporción real del archivo -- nunca un ratio fijo a ojo.
+
+    `None` si el archivo está dañado (más allá de los avisos inofensivos de "Corrupt JPEG data",
+    ver `_abrir_imagen_segura`) -- antes esto tumbaba la generación completa del PDF en vez de
+    omitir solo esa imagen (bug real, 26/10/2026)."""
+    img = _abrir_imagen_segura(path)
+    if img is None:
+        return None
+    img = _con_cuadricula(img)
     buf = BytesIO()
     img.save(buf, format="JPEG", quality=85)
     buf.seek(0)
@@ -308,13 +315,20 @@ def _imagen_proporcional(path: Path, ancho_pt: float) -> Image:
 
 
 _GUTTER_IMAGENES_PT = 10
+_ESTILO_IMAGEN_NO_DISPONIBLE = ParagraphStyle(
+    "img_no_disp", fontName="Helvetica-Oblique", fontSize=8.5, textColor=GRIS, alignment=TA_CENTER,
+)
+
+
+def _celda_imagen(path: Path, ancho_pt: float):
+    return _imagen_proporcional(path, ancho_pt) or _p("Imagen no disponible (archivo dañado)", _ESTILO_IMAGEN_NO_DISPONIBLE)
 
 
 def _fila_imagenes(ruta_base: Path, ruta_actual: Path) -> Table:
     ancho_img = (ANCHO_CONTENIDO_PT - _GUTTER_IMAGENES_PT) / 2
     data = [
         [_p("Base", _ESTILO_ETQ), "", _p("Actual", _ESTILO_ETQ)],
-        [_imagen_proporcional(ruta_base, ancho_img), "", _imagen_proporcional(ruta_actual, ancho_img)],
+        [_celda_imagen(ruta_base, ancho_img), "", _celda_imagen(ruta_actual, ancho_img)],
     ]
     t = Table(data, colWidths=[ancho_img, _GUTTER_IMAGENES_PT, ancho_img])
     t.setStyle(TableStyle([

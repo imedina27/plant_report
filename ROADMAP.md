@@ -1742,3 +1742,25 @@ explicar algo que los números solos no cuentan.
       realmente no existe para esa fecha, en vez de un PDF vacío -- `generar_reporte.py` ya tenía el
       mensaje "No se encontraron datos..." para ese caso, solo le faltaba que la función de abajo
       dejara de generar el PDF vacío antes de llegar ahí.
+- [x] **Bug real: un `.jpg` dañado tumbaba toda la corrida (26/10/2026)**: `main.py` crasheó con
+      `OSError: broken data stream when reading image file` justo al abrir la ventana de revisión
+      para la cámara `CA` de `QLYMSPROD01` (la primera vez que le tocaba revisión). Causa raíz: la
+      base de esa cámara (`CA.jpg`) está genuinamente dañada -- confirmado abriéndola con Pillow
+      directo. No es el aviso inofensivo de "Corrupt JPEG data" ya investigado antes
+      (`diagnostico_jpeg.py`, 0 fallas reales de 2873 imágenes con OpenCV) -- OpenCV sí la tolera lo
+      suficiente para comparar (por eso `CA` llevaba días en verde sin que nadie notara el problema),
+      pero Pillow es más estricto y revienta al querer **mostrarla** en la ventana de revisión o en
+      el PDF. `_cargar_para_tk()` (`ventana_revision.py`) e `_imagen_proporcional()`
+      (`reporte_ejecutivo.py`) abrían la imagen con Pillow sin ningún manejo de error -- un solo
+      archivo dañado detenía toda la corrida, con el humano sin poder contestar nada.
+      Corregido con una función compartida, `_abrir_imagen_segura()` (`ventana_revision.py`, también
+      usada desde `reporte_ejecutivo.py`): si Pillow no puede abrir el archivo, regresa `None` en vez
+      de propagar la excepción, con un aviso impreso en consola. La ventana de revisión muestra un
+      marcador gris ("Imagen no disponible (archivo dañado)") en vez de la imagen y deja que el
+      humano decida igualmente con el diagnóstico numérico; el PDF muestra el mismo texto como celda
+      en vez de la imagen, sin tumbar el resto del reporte. Verificado directo contra el archivo real
+      dañado en ambos puntos (ventana y PDF) -- ya no truena.
+      **Pendiente para el usuario**: la base de `CA` (`AbInBev/ZACATECAS/QLYMSPROD01/CA.jpg`, bajo
+      `IMAGE_BASE_ROOT`) sigue dañada en disco -- no se tocó, solo se evitó que tumbara el programa.
+      Lo más simple es borrar ese archivo a mano: la próxima corrida la vuelve a crear sola a partir
+      de la imagen de ese día (`image_compare.compare_camera_image`, estado "BASE CREADA").

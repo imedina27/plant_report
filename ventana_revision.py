@@ -126,8 +126,34 @@ def _con_cuadricula(img: Image.Image) -> Image.Image:
     return Image.alpha_composite(base, overlay).convert("RGB")
 
 
+def _abrir_imagen_segura(path: Path) -> Image.Image | None:
+    """Abre un `.jpg` tolerando archivos genuinamente dañados -- `None` si no se pudo.
+
+    Los avisos de "Corrupt JPEG data" que a veces se ven en consola casi siempre son inofensivos
+    para OpenCV (ver `diagnostico_jpeg.py`), pero Pillow (usado aquí y en `reporte_ejecutivo.py`
+    para mostrar/incrustar la imagen) es más estricto -- un archivo con datos realmente truncados
+    puede decodificar bien con OpenCV (suficiente para comparar) y aun así reventar con Pillow al
+    mostrarlo. Antes esto tumbaba toda la corrida justo al pedirle a un humano que revisara esa
+    cámara (bug real, 26/10/2026 -- base de la cámara `CA` en `QLYMSPROD01` genuinamente dañada)."""
+    try:
+        img = Image.open(path)
+        img.load()
+        return img
+    except (OSError, SyntaxError) as e:
+        print(f"  (!) No se pudo abrir la imagen {path} ({e})")
+        return None
+
+
+def _imagen_marcador(max_ancho: int, texto: str = "Imagen no disponible\n(archivo dañado)") -> Image.Image:
+    img = Image.new("RGB", (max_ancho, int(max_ancho * 0.6)), (90, 90, 90))
+    ImageDraw.Draw(img).text((12, 12), texto, fill="white")
+    return img
+
+
 def _cargar_para_tk(path: Path, max_ancho: int, con_cuadricula: bool = False) -> ImageTk.PhotoImage:
-    img = Image.open(path)
+    img = _abrir_imagen_segura(path)
+    if img is None:
+        return ImageTk.PhotoImage(_imagen_marcador(max_ancho))
     ratio = max_ancho / img.width
     img = img.resize((max_ancho, int(img.height * ratio)), Image.LANCZOS)
     if con_cuadricula:
