@@ -1763,4 +1763,26 @@ explicar algo que los números solos no cuentan.
       **Pendiente para el usuario**: la base de `CA` (`AbInBev/ZACATECAS/QLYMSPROD01/CA.jpg`, bajo
       `IMAGE_BASE_ROOT`) sigue dañada en disco -- no se tocó, solo se evitó que tumbara el programa.
       Lo más simple es borrar ese archivo a mano: la próxima corrida la vuelve a crear sola a partir
-      de la imagen de ese día (`image_compare.compare_camera_image`, estado "BASE CREADA").
+      de la imagen de ese día (`image_compare.compare_camera_image`, estado "BASE CREADA"). El usuario
+      ya borró `CA.jpg` por su cuenta.
+- [x] **Reversión de la corrida parcial del 26/10/2026 (tras el crash de `CA.jpg`)**: el usuario pidió
+      borrar de la base toda la revisión de ese día para poder correr `main.py` de nuevo desde cero.
+      104 cámaras (10 servidores de AbInBev) ya se habían guardado en `historial_comparacion` antes
+      del crash, 20 de ellas con veredicto humano. Borrar solo esas filas **no bastaba**: el estado
+      vivo en `perfil_camara` (`estado_actual`, `dias_no_concluyente_consecutivos`,
+      `n_confirmaciones_humanas`) ya había sido actualizado por esa corrida parcial para esas mismas
+      104 cámaras -- volver a correr el día sin revertir ese estado habría sumado un día extra al
+      contador de ámbar para varias cámaras (doble conteo), entre otras inconsistencias. Antes de
+      borrar nada, se hizo un *dry run* recalculando el estado vivo correcto de cada cámara afectada
+      reproduciendo `db._siguiente_estado()` sobre todo su historial **previo** al 26/10 (excluyendo
+      ese día) -- encontró que **26 de las 104** habrían quedado con un estado vivo incorrecto si solo
+      se borraba el historial (ej. `A2p` habría quedado en verde/0 en vez de su verdadero estado
+      previo, ámbar/2 días). Se aplicó todo en una sola transacción: `UPDATE perfil_camara` con el
+      estado recalculado para las 104 cámaras + `DELETE FROM historial_comparacion WHERE fecha =
+      CURRENT_DATE`. Verificado después: 0 filas de hoy, valores recalculados consistentes.
+      **Efecto colateral encontrado de paso**: `backfill_reportes.py` había quedado desactualizado
+      desde que se agregó la escalada de ámbar a morado al 3er día (sección anterior) -- llamaba a
+      `_siguiente_estado()` sin pasarle `dias_no_concluyente_consecutivos`, así que nunca aplicaba esa
+      escalada en el backfill, y tampoco tenía la lógica de "congelar la racha sin imagen" ni el campo
+      nuevo `camaras_no_concluyentes` de `ResumenServidor` (le habría faltado un argumento obligatorio
+      y tronado al primer uso). Corregido para que coincida exactamente con `db.guardar_resultado()`.

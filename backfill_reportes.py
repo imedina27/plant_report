@@ -71,11 +71,18 @@ def main() -> None:
                 )
 
             imagen_status = imagen_result["status"] if imagen_result else None
-            nuevo_estado = _siguiente_estado(perfil["estado_actual"], imagen_status, None)
-            nuevos_dias = (
-                perfil["dias_no_concluyente_consecutivos"] + 1
-                if imagen_status == "NO CONCLUYENTE" else 0
+            nuevo_estado = _siguiente_estado(
+                perfil["estado_actual"], imagen_status, None,
+                perfil["dias_no_concluyente_consecutivos"],
             )
+            # Misma lógica que db.guardar_resultado() -- un día sin imagen (ej. falla de conexión)
+            # congela la racha en vez de reiniciarla.
+            if imagen_status == "NO CONCLUYENTE":
+                nuevos_dias = perfil["dias_no_concluyente_consecutivos"] + 1
+            elif imagen_status is None:
+                nuevos_dias = perfil["dias_no_concluyente_consecutivos"]
+            else:
+                nuevos_dias = 0
             perfiles[clave] = {"estado_actual": nuevo_estado, "dias_no_concluyente_consecutivos": nuevos_dias}
 
             filas_por_servidor.setdefault((cliente, planta, servidor), []).append({
@@ -98,13 +105,17 @@ def main() -> None:
             camaras_ok = sum(
                 1 for f in filas if f["estado_actual"] == "verde" and f["log_estado"] != "ERROR"
             )
+            camaras_no_concluyentes = sum(
+                1 for f in filas if f["estado_actual"] == "amarillo" and f["log_estado"] != "ERROR"
+            )
             temperaturas = temperaturas_promedio_dia(servidor, fecha)
             resumen = ResumenServidor(
                 nombre=servidor, planta=planta,
                 cpu=temperaturas["cpu"] if temperaturas else None,
                 gpu=temperaturas["gpu"] if temperaturas else None,
                 discos=uso_disco_actual(servidor),
-                camaras_totales=len(filas), camaras_ok=camaras_ok, fallas=fallas,
+                camaras_totales=len(filas), camaras_ok=camaras_ok,
+                camaras_no_concluyentes=camaras_no_concluyentes, fallas=fallas,
             )
             por_cliente.setdefault(cliente, []).append(resumen)
             total_camaras_dia += len(filas)
