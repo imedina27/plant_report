@@ -3,7 +3,7 @@
 Una sola ventana persistente, abierta desde que arranca la corrida hasta que
 termina. Normalmente muestra progreso ("procesando cámara X de Y"); cuando una
 cámara da REVISAR, el mismo panel cambia a mostrar la comparación (base vs.
-actual + diagnóstico + 3 botones) y bloquea ahí hasta que se resuelve, luego
+actual + diagnóstico + 4 botones) y bloquea ahí hasta que se resuelve, luego
 vuelve a mostrar progreso y sigue sola.
 
 Construida con Tkinter (incluido en Python) + Pillow (única dependencia nueva,
@@ -170,7 +170,7 @@ class VentanaRevision:
         self.root = tk.Tk()
         self.root.title(f"{titulo_app} — Quantum Labs")
         self.root.configure(bg=t["background"])
-        self.root.geometry("1280x760")
+        self.root.geometry("1280x880")
         _oscurecer_titlebar(self.root, oscuro)
 
         self._accion = tk.StringVar(value="")
@@ -318,6 +318,9 @@ class VentanaRevision:
         tk.Button(frame_botones, text="Base Desactualizada", bg=AZUL, fg="white", activebackground=AZUL,
                   font=(FUENTE, 11, "bold"), width=18, relief="flat", bd=0,
                   command=lambda: self._accion.set("desactualizada")).grid(row=0, column=2, padx=8)
+        tk.Button(frame_botones, text="Actualizar Base", bg=WARN, fg="white", activebackground=WARN,
+                  font=(FUENTE, 11, "bold"), width=16, relief="flat", bd=0,
+                  command=lambda: self._accion.set("actualizar_base")).grid(row=0, column=3, padx=8)
 
         self.root.wait_variable(self._accion)
         observacion = self._texto_observacion.get("1.0", "end-1c").strip()

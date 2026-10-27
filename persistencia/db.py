@@ -80,7 +80,9 @@ def _siguiente_estado(
     `fuerza_revision_salud` (26/10/2026, salud absoluta de imagen): mismo efecto, pero como
     disparador inmediato de un solo día -- una obstrucción total no necesita esperar varios días
     para confirmarse, a diferencia de un desenfoque gradual."""
-    if veredicto_humano == "bien":
+    if veredicto_humano in ("bien", "actualizar_base"):
+        # "actualizar_base" (26/10/2026): la base estaba vieja, pero la foto de hoy ya sirve y se
+        # usó de inmediato como base nueva (ver main.py) -- el problema ya quedó resuelto.
         return "verde"
     if veredicto_humano == "mal":
         return "rojo"

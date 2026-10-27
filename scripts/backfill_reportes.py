@@ -40,7 +40,8 @@ SALIDA_ROOT = Path(__file__).parent.parent / "Reportes_Backfill"
 
 def main() -> None:
     # (cliente, planta, servidor, camara) ->
-    #   {"estado_actual", "dias_no_concluyente_consecutivos", "dias_borroso_consecutivos"}
+    #   {"estado_actual", "estado_desde", "dias_no_concluyente_consecutivos",
+    #    "dias_borroso_consecutivos"}
     perfiles: dict[tuple[str, str, str, str], dict] = {}
     resumen_por_dia: list[tuple[date, int, int]] = []  # (fecha, total_camaras, total_fallas)
 
@@ -59,8 +60,8 @@ def main() -> None:
             clave = (cliente, planta, servidor, camara)
             perfil = perfiles.setdefault(
                 clave,
-                {"estado_actual": "verde", "dias_no_concluyente_consecutivos": 0,
-                 "dias_borroso_consecutivos": 0},
+                {"estado_actual": "verde", "estado_desde": None,
+                 "dias_no_concluyente_consecutivos": 0, "dias_borroso_consecutivos": 0},
             )
             log_info = logs_por_servidor.get((cliente, planta, servidor), {}).get(camara)
 
@@ -103,14 +104,19 @@ def main() -> None:
                 nuevos_dias_borroso = perfil["dias_borroso_consecutivos"] + 1
             else:
                 nuevos_dias_borroso = 0
+            # Misma lógica que la columna estado_desde en db.guardar_resultado() -- se actualiza
+            # solo cuando el estado realmente cambia.
+            nuevo_estado_desde = fecha if nuevo_estado != perfil["estado_actual"] else perfil["estado_desde"]
             perfiles[clave] = {
-                "estado_actual": nuevo_estado, "dias_no_concluyente_consecutivos": nuevos_dias,
+                "estado_actual": nuevo_estado, "estado_desde": nuevo_estado_desde,
+                "dias_no_concluyente_consecutivos": nuevos_dias,
                 "dias_borroso_consecutivos": nuevos_dias_borroso,
             }
 
             filas_por_servidor.setdefault((cliente, planta, servidor), []).append({
                 "camara": camara,
                 "estado_actual": nuevo_estado,
+                "estado_desde": nuevo_estado_desde,
                 "dias_no_concluyente_consecutivos": nuevos_dias,
                 "imagen_motivo": imagen_result["motivo"] if imagen_result else None,
                 "log_estado": log_info["estado"] if log_info else None,

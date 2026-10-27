@@ -54,6 +54,22 @@ siendo la fuente de verdad del proyecto.
   al final de cada corrida -- solo puede volverse menos sensible que el umbral global, nunca más.
   Corrido contra producción: 0 cámaras calificaron todavía (máximo real: 8 muestras) -- esperado
   con solo 5-6 días de historial real.
+- `diagramas/03-modulo-ventana-revision.md`: documentación a fondo de `ui/ventana_revision.py` --
+  los dos paneles de la ventana única, el ciclo de vida de una corrida, y los detalles de
+  implementación (tema oscuro, cuadrícula de ayuda, manejo de imágenes dañadas, bloqueo de un solo
+  hilo).
+- Botón "Actualizar Base" en la ventana de revisión: si la foto de hoy ya sirve, la usa de
+  inmediato como base nueva (igual que un reemplazo en `ui/ventana_bases.py`, sin tener que abrir
+  esa ventana por separado) -- en 10 días frescos se promueve sola a mediana.
+- `scripts/preview_ventana_revision.py`: ve la ventana de revisión con datos e imágenes reales sin
+  tocar la base de datos ni correr `main.py` completo.
+- `diagramas/04-modulo-persistencia-db.md`: documentación a fondo de `persistencia/db.py` -- los 5
+  estados del semáforo, la máquina de estados completa, y cómo se arman las rachas de revisión
+  forzada.
+- `base_desactualizada` sin resolver 3+ días se ve en el PDF con la misma urgencia que un "Mal"
+  confirmado ("Base de imágenes desactualizada (N días sin resolver)") -- sin cambiar el estado
+  real de la cámara (sigue congelada, sigue en la lista de `ui/ventana_bases.py`), solo cómo se
+  reporta.
 
 ### Cambiado
 
@@ -79,6 +95,9 @@ siendo la fuente de verdad del proyecto.
 - IDs de nodo duplicados entre los dos diagramas Mermaid de `02-modulo-comparacion-imagen.md`
   (ambos usaban `A`, `B`, `C`...), que seguían impidiendo ver uno de los dos -- cada diagrama ahora
   tiene sus propios IDs únicos (`ep_*` / `cc_*`).
+- La ventana de revisión se quedaba con los botones fuera de la vista -- el diagnóstico creció de
+  2 a 6 líneas hoy y el alto de la ventana no. Ventana más alta (1280x880) y diagnóstico compactado
+  (nitidez + salud en una sola línea).
 
 ### Diseño
 

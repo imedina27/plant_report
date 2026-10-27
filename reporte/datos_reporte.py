@@ -56,6 +56,9 @@ def _etiqueta_sin_respuesta(log_motivo: str | None) -> tuple[str, str]:
     return "Error desconocido", "rojo"
 
 
+DIAS_BASE_DESACTUALIZADA_URGENTE = 3  # ver _clasificar_falla
+
+
 def _clasificar_falla(fila: dict, cliente: str, planta: str, servidor: str, fecha: date) -> CamaraFalla | None:
     """Reglas acordadas (ROADMAP.md, Fase 4): 🔴 rojo, 🟣 morado y 🔵 base desactualizada siempre
     cuentan, igual que una cámara sin respuesta ese día (el `.log` del servidor, no la comparación,
@@ -89,10 +92,22 @@ def _clasificar_falla(fila: dict, cliente: str, planta: str, servidor: str, fech
         # pedido 22/10/2026: ahora sí, para que la suma de las columnas del resumen cierre siempre
         # contra "Cámaras totales" y no quede ninguna cámara invisible en el reporte.
         ruta_base, ruta_actual = _rutas_imagenes(cliente, planta, servidor, fila["camara"], fecha)
+        motivo = fila["imagen_motivo"] or "Pendiente de que alguien suba una imagen limpia (ventana_bases.py)"
+        dias_sin_resolver = (fecha - fila["estado_desde"]).days if fila["estado_desde"] else 0
+        if dias_sin_resolver >= DIAS_BASE_DESACTUALIZADA_URGENTE:
+            # Pedido 26/10/2026: congelada sí, pero no indefinidamente sin presión -- a los 3 días
+            # sin resolver se ve con la misma urgencia que un "Mal" confirmado, para obligar a
+            # reemplazarla pronto. No cambia `estado_actual` en la base de datos (sigue
+            # "base_desactualizada" -- la cámara sigue en la lista de `ui/ventana_bases.py` y
+            # `main.py` sigue sin comparar nada contra esa base); es solo cómo se ve en el reporte.
+            return CamaraFalla(
+                fila["camara"], "rojo",
+                f"Base de imágenes desactualizada ({dias_sin_resolver} días sin resolver)",
+                motivo, ruta_base, ruta_actual,
+            )
         return CamaraFalla(
             fila["camara"], "base_desactualizada", "Base de imágenes desactualizada",
-            fila["imagen_motivo"] or "Pendiente de que alguien suba una imagen limpia (ventana_bases.py)",
-            ruta_base, ruta_actual,
+            motivo, ruta_base, ruta_actual,
         )
     return None
 
@@ -147,7 +162,7 @@ def _resumen_servidor(conn, cliente: str, planta: str, servidor: str, fecha: dat
     with conn.cursor() as cur:
         cur.execute(
             """
-            SELECT p.camara, p.estado_actual, p.dias_no_concluyente_consecutivos,
+            SELECT p.camara, p.estado_actual, p.dias_no_concluyente_consecutivos, p.estado_desde,
                    h.imagen_motivo, h.log_estado, h.log_motivo
             FROM historial_comparacion h JOIN perfil_camara p ON p.id = h.camara_id
             WHERE p.cliente = %s AND p.planta = %s AND p.servidor = %s AND h.fecha = %s

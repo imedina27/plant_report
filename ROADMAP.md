@@ -2278,3 +2278,110 @@ paso acordado: entender bien cómo está hecha la v1 actual antes de decidir qu�
       ahora sí se ajusta solo, cámara por cámara, conforme se acumulen suficientes días reales de
       cada una -- se espera ver a `B04`/`N2p` calibrarse en las próximas ~1-2 semanas conforme
       lleguen a las 20 muestras.
+  - **¿Y si borramos la base y reprocesamos todo octubre?** (26/10/2026) El usuario preguntó si
+    era factible borrar la base de datos actual y volver a correr todo octubre para tener más
+    datos de una vez. Se descartó: el archivo real (`CHECK_PLANTS_ROOT`) sí llega hasta el
+    22/09/2026 (24 fechas distintas, con huecos), así que es técnicamente posible -- pero el
+    ingrediente que más hace falta (`veredicto_humano`) no se puede generar retroactivamente sin un
+    humano real mirando cada imagen. Correrlo con `--no-interaction` daría más filas `OK`/`REVISAR`
+    pero cero veredictos nuevos -- justo lo que no soluciona nada para `B04`/`N2p`. Correrlo
+    interactivo para ~26 días implicaría el mismo esfuerzo humano que ya se va a invertir usando el
+    programa normalmente, solo que concentrado en una sesión en vez de repartido. Y borrar la base
+    actual tiene un costo real: se perderían los 6 días de datos genuinos ya recolectados
+    (incluyendo los 2 incidentes "mal" confirmados), que no se pueden reproducir después. Se decidió
+    simplemente dejarlo correr de forma normal -- `backfill_reportes.py` ya existe para el caso de
+    querer una vista histórica sin tocar la base de datos real, si hiciera falta más adelante.
+
+- **`diagramas/03-modulo-ventana-revision.md` creado (26/10/2026)**: documentación a fondo de
+  `ui/ventana_revision.py` -- los dos paneles de la ventana única y persistente (procesando / pedir
+  revisión), el ciclo de vida completo de una corrida, los detalles de implementación que vale la
+  pena recordar (tema oscuro leído una sola vez del registro de Windows, cuadrícula de ayuda visual
+  dibujada sobre una copia en memoria, manejo de imágenes dañadas con un marcador en vez de
+  crashear, bloqueo de un solo hilo vía `wait_variable`), la tabla de qué hace `main.py` con cada
+  uno de los botones, y qué NO hace este módulo (no decide cuándo abrirse, no toca la base de
+  datos, no es la misma ventana que `ui/ventana_bases.py`).
+- **Botón "Actualizar Base" agregado a `ui/ventana_revision.py` (26/10/2026)**. El usuario notó un
+  hueco real al revisar el módulo recién documentado: hoy, si la base está desactualizada pero la
+  foto de hoy que ya está en pantalla sirve perfectamente, la única opción era "Base
+  Desactualizada" -- que congela la cámara y obliga a abrir `ui/ventana_bases.py` por separado para
+  subir una imagen a mano, aunque ya se tenía una buena frente a los ojos.
+  - Nuevo 4º botón ("Actualizar Base", color ámbar -- `WARN`, ya existía en la paleta sin usarse):
+    usa la foto de hoy (`jpg_path`) como base nueva de inmediato, reutilizando exactamente el mismo
+    mecanismo que ya construimos hoy para `ui/ventana_bases.py` (`save_base` + limpiar historial +
+    arrancar historial fresco + `db.marcar_base_reemplazada`) -- en 10 días frescos se promueve
+    sola a mediana, sin que nadie tenga que volver a entrar a otra ventana.
+  - `ui/ventana_revision.py` sigue sin tocar la base de datos ni archivos -- solo regresa el nuevo
+    valor `"actualizar_base"` en la tupla `(accion, observacion)`, igual que los otros 3. Toda la
+    lógica de guardar/promover vive en `main.py`, que ya importaba el resto de estas piezas.
+  - `_siguiente_estado()` (`persistencia/db.py`) trata `"actualizar_base"` igual que `"bien"` --
+    pasa a verde, el problema ya quedó resuelto en el momento.
+  - Probado de punta a punta con una cámara desechable: historial viejo (3 días) queda limpiado,
+    la base se reemplaza con la foto de "hoy", `base_reemplazada_el` queda puesta, y el estado pasa
+    a verde -- el mismo resultado que lograr lo mismo a mano en dos pasos por separado, ahora en
+    uno solo.
+- **`scripts/preview_ventana_revision.py` (nuevo, 26/10/2026)**: el usuario pidió ver la ventana de
+  revisión de verdad para aprobar la construcción/distribución, sin disparar una corrida completa
+  que toque la base de datos innecesariamente. El script busca una cámara real con base + historial
+  completo, le aplica un desplazamiento sintético de 40px **en memoria** (nunca se guarda) para
+  forzar el diagnóstico más largo posible, lo arma con `main._formatear_diagnostico()` (el mismo
+  texto exacto que vería un usuario real), y abre la ventana real -- sin importar `persistencia.db`
+  en ningún momento, así que no hay manera de que toque la base de datos.
+  - **Hallazgo real al probarlo**: la ventana se quedó en su alto fijo de siempre (760px), pero el
+    diagnóstico creció de 2 a 6 líneas hoy -- los botones de abajo quedaban fuera de la vista.
+    Corregido en dos frentes: `self.root.geometry()` subido a `1280x880`, y el diagnóstico
+    compactado juntando nitidez + salud en una sola línea (5 líneas en el peor caso, antes 6).
+  - **Pregunta de paso, respondida**: el usuario notó un "camión fantasma" semitransparente en la
+    base de la cámara de prueba (`AD1p`, una de las 208 promovidas a mediana hoy). No es un bug --
+    es la mediana de 10 días mostrando un objeto que apareció en una porción intermedia de los días
+    muestreados (ni tan poco como para que la mediana lo descarte limpio, ni tan seguido como para
+    que se vea sólido). Es el mismo trade-off de la técnica que se discutió semanas atrás al elegir
+    mediana sobre una sola foto -- aceptado por ahora, sin evidencia de que cause problemas reales
+    en la comparación; si llegara a darlos, la solución natural sería el enmascarado de objetos en
+    movimiento con un detector tipo YOLO que se había descartado por ahora (ver conversación sobre
+    el hardware de la máquina).
+  - Confirmado explícitamente con el usuario: en producción, las imágenes que ve un humano en
+    `ventana_revision.py` son los archivos reales sin ninguna modificación (la cuadrícula de ayuda
+    se dibuja sobre una copia en memoria solo para mostrarla, nunca toca el archivo guardado); el
+    desplazamiento sintético solo existe en este script de prueba.
+
+- **`diagramas/04-modulo-persistencia-db.md` creado (26/10/2026)**: documentación a fondo de
+  `persistencia/db.py` -- las dos tablas (`perfil_camara`/`historial_comparacion`), los 5 estados
+  del semáforo y qué significa cada uno, la máquina de estados `_siguiente_estado()` completa (su
+  orden de prioridad explícito, de mayor a menor), cómo `guardar_resultado()` arma las banderas de
+  "forzar revisión" y actualiza las dos rachas (con el porqué de "se congela" en vez de "se
+  reinicia a 0"), el resto de funciones del módulo, y qué NO hace.
+- **`base_desactualizada` escala a urgente en el reporte tras 3 días sin resolver (26/10/2026)**.
+  Al explicar la máquina de estados, el usuario notó que hoy `base_desactualizada` se congela
+  indefinidamente sin ninguna presión creciente para resolverla -- pidió que a los 3 días se vea
+  con la misma urgencia que un "Mal" confirmado, con la nota "BASE DESACTUALIZADA", para obligar a
+  reemplazarla pronto.
+  - **Decisión de diseño confirmada**: NO cambiar `perfil_camara.estado_actual` a `rojo` de verdad.
+    Si se hiciera, la cámara desaparecería de la lista de `ui/ventana_bases.py` (que solo muestra
+    `estado_actual = 'base_desactualizada'` exactamente) y `main.py` dejaría de tratarla como
+    desactualizada (`ya_desactualizada` se volvería falso), reanudando comparaciones reales contra
+    una base que todos ya acordaron que está mal -- con el riesgo de que algún día la foto nueva se
+    pareciera lo suficiente a esa base mala y la cámara "se recuperara sola" sin que nadie la
+    hubiera arreglado de verdad. Se optó por una escalada **solo a nivel de reporte**: por dentro
+    la cámara sigue congelada en `base_desactualizada` (sigue en la lista de `ventana_bases.py`,
+    sigue sin compararse contra nada), pero el PDF la clasifica y colorea como `rojo` después de 3
+    días, con la etiqueta "Base de imágenes desactualizada (N días sin resolver)".
+  - No hizo falta una columna nueva -- `perfil_camara.estado_desde` ya guarda desde cuándo está en
+    el estado actual (se fija la primera vez que cambia, no se vuelve a tocar mientras no cambie),
+    así que los días sin resolver salen de `fecha - estado_desde` directamente.
+  - `reporte/datos_reporte.py`: nueva constante `DIAS_BASE_DESACTUALIZADA_URGENTE = 3`;
+    `_resumen_servidor()` ahora también trae `estado_desde`; `_clasificar_falla()` calcula los días
+    sin resolver y escala la clasificación cuando corresponde. `scripts/backfill_reportes.py`
+    actualizado para trackear `estado_desde` en su réplica en memoria de la máquina de estados
+    (mismo criterio que `guardar_resultado()`: se actualiza solo cuando el estado cambia de verdad).
+  - Probado: 0/2/3 días sin resolver (clasificación normal, normal, escala a rojo con la nota), y
+    el caso sin `estado_desde` (cámara que nunca cambió de estado, no debería pasar en la práctica
+    pero no truena, se trata como 0 días). Verificado contra producción real: las 2 cámaras
+    actualmente en `base_desactualizada` llevan 0 días (se marcaron hoy mismo), así que el próximo
+    reporte no se ve afectado todavía.
+
+- **Siguiente paso (sesión del 27/10/2026)**: revisar a fondo el módulo del reporte ejecutivo en
+  PDF -- `reporte/datos_reporte.py` (arma los datos desde la base de datos) y
+  `reporte/reporte_ejecutivo.py` (construye el PDF en sí, sin tocar ninguna base de datos). Mismo
+  tratamiento que los módulos anteriores: diagrama de flujo en `diagramas/` primero, y de ahí
+  decidir si hace falta alguna modificación (ej. cómo se ve la nueva escalada de `base
+  desactualizada` a los 3 días, o cualquier otro ajuste que surja de revisarlo con calma).

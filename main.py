@@ -4,7 +4,14 @@ from datetime import date, datetime
 from pathlib import Path
 
 from comparacion.config_compare import CHECK_PLANTS_ROOT, compare_camera_config
-from comparacion.image_compare import base_path, compare_camera_image, promover_base_a_mediana
+from comparacion.image_compare import (
+    base_path,
+    compare_camera_image,
+    guardar_historial_imagen,
+    limpiar_historial_imagen,
+    promover_base_a_mediana,
+    save_base,
+)
 from comparacion.log_parse import parsear_log_servidor
 from integraciones.correo import enviar_reportes
 from persistencia import db
@@ -72,18 +79,19 @@ def _formatear_diagnostico(r: dict) -> str:
             f"ORB detallado: traslación ({fmt(r['orb_tx'])}, {fmt(r['orb_ty'])}) px, "
             f"rotación {fmt(r['orb_rotacion_deg'], '°')}, escala {fmt(r['orb_escala'])}"
         )
-    if r.get("nitidez_hoy") is not None:
-        sospechosa = " (SOSPECHOSA)" if r.get("nitidez_sospechosa") else ""
-        lineas.append(
-            f"Nitidez: {fmt(r['nitidez_hoy'])} hoy vs. mediana histórica "
-            f"{fmt(r['nitidez_mediana_hist'])}{sospechosa}"
-        )
-    if r.get("salud_varianza") is not None:
-        sospechosa = " (SOSPECHOSA)" if r.get("salud_sospechosa") else ""
-        lineas.append(
-            f"Salud: varianza {fmt(r['salud_varianza'])}, brillo {fmt(r['salud_brillo'])}"
-            f"{sospechosa}"
-        )
+    if r.get("nitidez_hoy") is not None or r.get("salud_varianza") is not None:
+        partes = []
+        if r.get("nitidez_hoy") is not None:
+            sospechosa = " (SOSPECHOSA)" if r.get("nitidez_sospechosa") else ""
+            partes.append(
+                f"Nitidez {fmt(r['nitidez_hoy'])} vs. mediana {fmt(r['nitidez_mediana_hist'])}{sospechosa}"
+            )
+        if r.get("salud_varianza") is not None:
+            sospechosa = " (SOSPECHOSA)" if r.get("salud_sospechosa") else ""
+            partes.append(
+                f"Salud: varianza {fmt(r['salud_varianza'])}, brillo {fmt(r['salud_brillo'])}{sospechosa}"
+            )
+        lineas.append("      ".join(partes))
     if r.get("diaanterior_status") is not None:
         lineas.append(
             f"Vs. día anterior: {r['diaanterior_status']} -- ORB {fmt(r['diaanterior_orb_desp'], ' px')}, "
@@ -197,6 +205,15 @@ def main() -> None:
                     )
                     if veredicto_humano == "desactualizada":
                         partes.append("base marcada como desactualizada")
+                    elif veredicto_humano == "actualizar_base":
+                        # La base estaba vieja, pero la foto de hoy ya sirve -- se usa de
+                        # inmediato como base provisional, igual que en ui/ventana_bases.py
+                        # (ROADMAP.md, 26/10/2026): en 10 días frescos se promueve sola a mediana.
+                        save_base(cliente, planta, servidor, camara, jpg_path)
+                        limpiar_historial_imagen(cliente, planta, servidor, camara)
+                        guardar_historial_imagen(cliente, planta, servidor, camara, jpg_path, fecha)
+                        db.marcar_base_reemplazada(conn, cliente, planta, servidor, camara)
+                        partes.append("base actualizada con la imagen de hoy")
                     elif veredicto_humano == "mal":
                         if solo_por_salud:
                             motivo_mal = "posible lente tapado/obstruido (salud de imagen)"
