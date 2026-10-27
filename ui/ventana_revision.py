@@ -33,7 +33,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageTk
 
-ASSETS_DIR = Path(__file__).parent / "assets"
+ASSETS_DIR = Path(__file__).parent.parent / "assets"
 
 # --- Paleta Quantum Labs (de styles/stylesheet.py) ------------------------
 FUENTE = "Segoe UI"
@@ -331,9 +331,12 @@ class VentanaRevision:
 
 
 if __name__ == "__main__":
+    # Demo manual -- correr como módulo desde la raíz del repo (no "python ui/ventana_revision.py"
+    # directo, eso no resolvería el import de comparacion.image_compare):
+    #   pipenv run python -m ui.ventana_revision
     import time
 
-    from image_compare import base_path, compare_camera_image
+    from comparacion.image_compare import base_path, compare_camera_image
 
     camaras_demo = [
         "AbInBev/ZACATECAS/QLYMSPROD01/A1p",

@@ -3,13 +3,13 @@ import time
 from datetime import date, datetime
 from pathlib import Path
 
-import db
-from config_compare import CHECK_PLANTS_ROOT, compare_camera_config
-from correo import enviar_reportes
-from datos_reporte import generar_reportes_del_dia
-from image_compare import base_path, compare_camera_image
-from log_parse import parsear_log_servidor
-from ventana_revision import VentanaRevision
+from comparacion.config_compare import CHECK_PLANTS_ROOT, compare_camera_config
+from comparacion.image_compare import base_path, compare_camera_image
+from comparacion.log_parse import parsear_log_servidor
+from integraciones.correo import enviar_reportes
+from persistencia import db
+from reporte.datos_reporte import generar_reportes_del_dia
+from ui.ventana_revision import VentanaRevision
 
 
 def _camaras_del_dia(

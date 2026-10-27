@@ -21,7 +21,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-LOGO_FIRMA = Path(__file__).parent / "assets" / "QuantumLab-Logo-01.png"
+LOGO_FIRMA = Path(__file__).parent.parent / "assets" / "QuantumLab-Logo-01.png"
 
 # Reintentos ante errores transitorios (timeout, conexión rechazada) -- no indefinidos (ROADMAP.md,
 # sección "manejo de fallos" de Fase 5).

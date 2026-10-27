@@ -20,9 +20,9 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog
 
-import db
-from image_compare import IMAGE_BASE_ROOT, save_base
-from ventana_revision import (
+from comparacion.image_compare import IMAGE_BASE_ROOT, save_base
+from persistencia import db
+from ui.ventana_revision import (
     ACENTO,
     DARK_THEME,
     FUENTE,

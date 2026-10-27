@@ -9,6 +9,7 @@ Uso: pipenv run python diagnostico_jpeg.py
 from __future__ import annotations
 
 import os
+import sys
 import tempfile
 from datetime import date, timedelta
 from pathlib import Path
@@ -16,7 +17,9 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from image_compare import CHECK_PLANTS_ROOT
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from comparacion.image_compare import CHECK_PLANTS_ROOT
 
 FECHA_INICIO = date(2026, 10, 1)
 FECHA_FIN = date.today()

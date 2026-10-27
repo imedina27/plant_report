@@ -12,7 +12,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from reporte_ejecutivo import CamaraFalla, MetricaServidor, MontajeDisco, ResumenServidor, construir_pdf
+from reporte.reporte_ejecutivo import CamaraFalla, MetricaServidor, MontajeDisco, ResumenServidor, construir_pdf
 
 SERVIDORES = [
     # Servidor sano: todo OK, sin detalle (no genera hoja propia).

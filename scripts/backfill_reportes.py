@@ -18,21 +18,24 @@ Uso: pipenv run python backfill_reportes.py
 
 from __future__ import annotations
 
+import sys
 from datetime import date, timedelta
 from pathlib import Path
 
-from config_compare import compare_camera_config
-from datos_reporte import _clasificar_falla
-from db import _siguiente_estado
-from image_compare import compare_camera_image
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from comparacion.config_compare import compare_camera_config
+from comparacion.image_compare import compare_camera_image
+from integraciones.monit_client import temperaturas_promedio_dia, uso_disco_actual
 from main import _camaras_del_dia
-from monit_client import temperaturas_promedio_dia, uso_disco_actual
-from reporte_ejecutivo import ResumenServidor, construir_pdf
+from persistencia.db import _siguiente_estado
+from reporte.datos_reporte import _clasificar_falla
+from reporte.reporte_ejecutivo import ResumenServidor, construir_pdf
 
 FECHA_INICIO = date(2026, 10, 1)
 FECHA_FIN = date.today()
 
-SALIDA_ROOT = Path(__file__).parent / "Reportes_Backfill"
+SALIDA_ROOT = Path(__file__).parent.parent / "Reportes_Backfill"
 
 
 def main() -> None:

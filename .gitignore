@@ -4,6 +4,7 @@ __pycache__/
 venv/
 .env
 .vscode/
+CLAUDE.local.md
 /Test/
 /script/capture_img/images/
 /Reportes/

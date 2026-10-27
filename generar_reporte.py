@@ -11,9 +11,9 @@ preguntar, pero sí tendría que volver a leer y comparar todo.
 import argparse
 from datetime import date, datetime
 
-import db
-from correo import enviar_reportes
-from datos_reporte import generar_reportes_del_dia
+from integraciones.correo import enviar_reportes
+from persistencia import db
+from reporte.datos_reporte import generar_reportes_del_dia
 
 
 def main() -> None:

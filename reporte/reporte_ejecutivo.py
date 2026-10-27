@@ -40,9 +40,9 @@ from reportlab.platypus import (
     TableStyle,
 )
 
-from ventana_revision import _abrir_imagen_segura, _con_cuadricula
+from ui.ventana_revision import _abrir_imagen_segura, _con_cuadricula
 
-LOGO = Path(__file__).parent / "assets" / "QuantumLab-Logo-01.png"
+LOGO = Path(__file__).parent.parent / "assets" / "QuantumLab-Logo-01.png"
 
 MARGEN_PT = 24
 ANCHO_CONTENIDO_PT = letter[0] - 2 * MARGEN_PT

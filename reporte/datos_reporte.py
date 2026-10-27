@@ -12,10 +12,10 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-import monit_client
-from image_compare import CHECK_PLANTS_ROOT
-from image_compare import base_path as ruta_base_imagen
-from reporte_ejecutivo import CamaraFalla, ResumenServidor, construir_pdf
+from comparacion.image_compare import CHECK_PLANTS_ROOT
+from comparacion.image_compare import base_path as ruta_base_imagen
+from integraciones import monit_client
+from reporte.reporte_ejecutivo import CamaraFalla, ResumenServidor, construir_pdf
 
 load_dotenv()
 

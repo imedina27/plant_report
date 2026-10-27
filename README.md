@@ -9,6 +9,24 @@ experimentos) — este README es solo la guía práctica de instalación y uso.
 El ordenamiento de los `.log` de revisión no es parte de este proyecto: lo hace el programa externo
 de revisión de cámaras antes de que estos archivos lleguen aquí.
 
+## Estructura del proyecto
+
+Los puntos de entrada (lo que se corre directo) están en la raíz; todo lo demás está agrupado por
+responsabilidad en paquetes, pensados para poder reutilizarse en otros programas más adelante:
+
+| Carpeta | Contiene |
+| --- | --- |
+| *(raíz)* | Puntos de entrada: `main.py`, `generar_reporte.py`, `migrate.py`. |
+| `comparacion/` | Lógica pura de comparación -- `config_compare.py`, `image_compare.py`, `log_parse.py`. Sin base de datos, red ni UI. |
+| `persistencia/` | `db.py` -- todo el acceso a PostgreSQL. |
+| `reporte/` | `datos_reporte.py` (arma los datos) y `reporte_ejecutivo.py` (arma el PDF). |
+| `integraciones/` | Clientes de sistemas externos -- `monit_client.py` (Monit_Servers_V2) y `correo.py` (SMTP). |
+| `ui/` | Ventanas Tkinter -- `ventana_revision.py` y `ventana_bases.py`. |
+| `scripts/` | Scripts de administración de un solo uso (ver tabla abajo). |
+| `migrations/` | Archivos `.sql` del esquema de base de datos. |
+| `diagramas/` | Diagramas de flujo del proyecto (Mermaid). |
+| `assets/` | Logo y recursos visuales compartidos. |
+
 ## Instalación
 
 ```powershell
@@ -64,7 +82,7 @@ falló por completo según el `.log` del servidor):
    fase).
 3. Si la imagen da `REVISAR` -- o si da `NO CONCLUYENTE` tres días seguidos -- abre una ventana para
    que un humano confirme si la cámara se movió de verdad, si es un falso positivo, o si hay que
-   marcar la base como desactualizada (ver `ventana_bases.py` abajo) — a menos que ya esté
+   marcar la base como desactualizada (ver `ui/ventana_bases.py` abajo) — a menos que ya esté
    confirmada como movida de un día anterior, en cuyo caso no se vuelve a preguntar.
 4. Guarda el resultado en PostgreSQL (cámara por cámara, justo después de resolverla).
 
@@ -86,13 +104,14 @@ pipenv run python main.py --no-interaction --date h
 
 ## Ventanas
 
-- **`ventana_revision.py`** — se abre sola desde `main.py` cuando hace falta revisar una cámara; no
-  se corre por separado.
-- **`ventana_bases.py`** — ventana aparte, independiente de la corrida diaria, para reemplazar las
-  bases de imagen marcadas como desactualizadas con una foto limpia elegida a mano:
+- **`ui/ventana_revision.py`** — se abre sola desde `main.py` cuando hace falta revisar una
+  cámara; no se corre por separado (su demo manual sí se puede correr con
+  `pipenv run python -m ui.ventana_revision`, ver el `if __name__ == "__main__"` del archivo).
+- **`ui/ventana_bases.py`** — ventana aparte, independiente de la corrida diaria, para reemplazar
+  las bases de imagen marcadas como desactualizadas con una foto limpia elegida a mano:
 
   ```powershell
-  pipenv run python ventana_bases.py
+  pipenv run python -m ui.ventana_bases
   ```
 
 ## Scripts de administración (uso puntual, no parte de la corrida diaria)
@@ -101,10 +120,10 @@ pipenv run python main.py --no-interaction --date h
 | --- | --- |
 | `migrate.py` | Aplica el esquema de base de datos (ver "Base de datos" arriba). |
 | `generar_reporte.py` | Genera (y pregunta si enviar) el reporte ejecutivo de una fecha que ya se procesó con `main.py`, sin repetir la comparación de cámaras ni la revisión humana -- usa lo que ya quedó guardado en la base de datos. Útil si esa corrida se hizo sin generar el reporte por error. Mismas banderas que `main.py`: `--no-interaction`, `--client`, `--date`. |
-| `bootstrap_config_base.py` | Llena de una sola vez las bases de configuración que falten, usando el `.json` más reciente disponible por cámara. No sobrescribe bases existentes. |
-| `bootstrap_image_base.py` | Igual que el anterior, pero para las bases de imagen. |
-| `backfill_reportes.py` | Vuelve a correr la comparación sobre un rango de fechas pasadas **sin tocar la base de datos** (ni enviar correos) — solo para revisar resultados sobre datos históricos. |
-| `diagnostico_jpeg.py` | Revisa si alguna imagen real falla al decodificarse (más allá de los avisos de "Corrupt JPEG" que a veces se ven en consola, que normalmente son inofensivos). |
+| `scripts/bootstrap_config_base.py` | Llena de una sola vez las bases de configuración que falten, usando el `.json` más reciente disponible por cámara. No sobrescribe bases existentes. |
+| `scripts/bootstrap_image_base.py` | Igual que el anterior, pero para las bases de imagen. |
+| `scripts/backfill_reportes.py` | Vuelve a correr la comparación sobre un rango de fechas pasadas **sin tocar la base de datos** (ni enviar correos) — solo para revisar resultados sobre datos históricos. |
+| `scripts/diagnostico_jpeg.py` | Revisa si alguna imagen real falla al decodificarse (más allá de los avisos de "Corrupt JPEG" que a veces se ven en consola, que normalmente son inofensivos). |
 | `scripts/mock_reporte_ejecutivo.py` | Genera un PDF de muestra del reporte ejecutivo con datos inventados, para revisar el diseño sin tocar ninguna base de datos real. |
 
 ## Script de captura independiente

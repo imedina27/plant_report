@@ -1786,3 +1786,56 @@ explicar algo que los números solos no cuentan.
       escalada en el backfill, y tampoco tenía la lógica de "congelar la racha sin imagen" ni el campo
       nuevo `camaras_no_concluyentes` de `ResumenServidor` (le habría faltado un argumento obligatorio
       y tronado al primer uso). Corregido para que coincida exactamente con `db.guardar_resultado()`.
+
+## Exploración de una "Versión 2" (26/10/2026)
+
+El usuario empezó a sentir que el programa "se complica" (bases de imagen imperfectas, resultados
+que no siempre convencen) y planteó la idea de rediseñar el programa desde cero -- una v2. Primer
+paso acordado: entender bien cómo está hecha la v1 actual antes de decidir qué cambiar.
+
+- **Carpeta `diagramas/` creada**, con diagramas de flujo en Mermaid por módulo/punto de entrada.
+  Primer diagrama: `diagramas/01-flujo-main.md` (flujo completo de `main.py`, paso a paso, más el
+  mapa de qué módulo importa a cuál). Se corrigió un error de sintaxis Mermaid en el segundo
+  diagrama (un ciclo de vuelta sobre un nodo de decisión más signos `¿?` dentro de etiquetas con
+  pipe) que lo dejaba en blanco en el visor del usuario.
+- **`CLAUDE.md`** (versionado) y **`CLAUDE.local.md`** (no versionado, en `.gitignore`) creados --
+  instrucciones de proyecto vs. notas personales de la máquina de Ismael. Reglas explícitas
+  agregadas: actualizar siempre `ROADMAP.md` después de cada interacción correcta (o antes de
+  cualquier push), y actualizar siempre `CHANGELOG.md` después de cada interacción.
+- **`CHANGELOG.md` creado**, reconstruido desde el historial real de `git log` -- registro breve y
+  cronológico (formato Keep a Changelog, agrupado por fecha en vez de versión, ya que el proyecto no
+  se publica como paquete y no maneja número de versión en ningún archivo).
+- **Reestructuración del proyecto por paquetes (26/10/2026)**, pensando en que varios de estos
+  módulos se van a reutilizar más adelante (ej. en el futuro programa de administración, que es un
+  proyecto aparte -- ver `CLAUDE.md`/memoria). Los puntos de entrada (`main.py`,
+  `generar_reporte.py`, `migrate.py`) se quedan en la raíz -- así los lanzadores `.ps1` externos no
+  necesitan tocarse. Todo lo demás se agrupó por responsabilidad:
+  - `comparacion/` -- `config_compare.py`, `image_compare.py`, `log_parse.py` (lógica pura, sin DB/
+    red/UI).
+  - `persistencia/` -- `db.py`.
+  - `reporte/` -- `datos_reporte.py`, `reporte_ejecutivo.py`.
+  - `integraciones/` -- `monit_client.py`, `correo.py`.
+  - `ui/` -- `ventana_revision.py`, `ventana_bases.py`.
+  - `scripts/` -- se consolidaron ahí todos los scripts de un solo uso que antes vivían sueltos en
+    la raíz (`bootstrap_config_base.py`, `bootstrap_image_base.py`, `backfill_reportes.py`,
+    `diagnostico_jpeg.py`), junto con el que ya estaba (`mock_reporte_ejecutivo.py`).
+  Movido con `git mv` (conserva el historial de cada archivo). Cada carpeta nueva lleva un
+  `__init__.py` con una línea describiendo su propósito.
+  - **Detalles que había que corregir al mover, más allá de los imports**: tres módulos construyen
+    rutas con `Path(__file__).parent` para llegar a `assets/` (`reporte_ejecutivo.py` → el logo del
+    PDF, `correo.py` → el logo de la firma, `ventana_revision.py` → `ASSETS_DIR`) -- al quedar un
+    nivel más adentro, se corrigieron a `.parent.parent` para seguir apuntando a la raíz del
+    proyecto. Lo mismo con `backfill_reportes.py`: su `SALIDA_ROOT` apuntaba a
+    `Reportes_Backfill/` junto al propio archivo -- al moverse a `scripts/`, se corrigió para que
+    el PDF siga guardándose en la raíz del repo, no dentro de `scripts/`.
+  - **Scripts de administración**: como ahora viven en `scripts/` pero importan paquetes que viven
+    en la raíz, se les agregó el mismo truco que ya traía `mock_reporte_ejecutivo.py`
+    (`sys.path.insert(0, str(Path(__file__).parent.parent))`) antes de sus imports del proyecto.
+  - **`ventana_revision.py` ya no se puede correr directo** (`python ui/ventana_revision.py`) --
+    su demo manual (`if __name__ == "__main__"`) ahora se corre como módulo desde la raíz:
+    `pipenv run python -m ui.ventana_revision`. Documentado en el propio archivo y en el README.
+  - Verificado extensamente antes de dar por bueno: compilación de todos los archivos, import real
+    de los tres puntos de entrada y de los 5 scripts de `scripts/`, `main.py --help`,
+    `migrate.py` (idempotente, sin re-aplicar nada), y una generación real de reporte PDF contra la
+    base de datos de producción (`generar_reportes_del_dia` para AbInBev, 24/10/2026) -- todo
+    funcionando exactamente igual que antes de mover los archivos.

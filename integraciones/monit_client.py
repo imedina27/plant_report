@@ -17,7 +17,7 @@ from functools import lru_cache
 import requests
 from dotenv import load_dotenv
 
-from reporte_ejecutivo import MetricaServidor, MontajeDisco
+from reporte.reporte_ejecutivo import MetricaServidor, MontajeDisco
 
 load_dotenv()
 
