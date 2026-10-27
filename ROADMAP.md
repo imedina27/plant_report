@@ -1839,3 +1839,442 @@ paso acordado: entender bien cómo está hecha la v1 actual antes de decidir qu�
     `migrate.py` (idempotente, sin re-aplicar nada), y una generación real de reporte PDF contra la
     base de datos de producción (`generar_reportes_del_dia` para AbInBev, 24/10/2026) -- todo
     funcionando exactamente igual que antes de mover los archivos.
+- **`diagramas/01-flujo-main.md` actualizado (26/10/2026)**: tras la reestructuración por paquetes,
+  los nombres de módulo del diagrama (narrativa + los dos Mermaid) se actualizaron a las rutas
+  nuevas (`comparacion.`, `persistencia.`, `reporte.`, `integraciones.`, `ui.`, `scripts.`), en vez
+  de dejarlo apuntando a ubicaciones que ya no existen.
+- **Avisos de `markdownlint` corregidos en `CHANGELOG.md` (26/10/2026)**: encabezados y listas sin
+  su línea en blanco antes/después (MD022/MD032). El aviso de "encabezado duplicado" (MD024) para
+  `### Agregado`/`### Cambiado`/`### Corregido` repetidos bajo cada fecha es esperado en este
+  formato (Keep a Changelog) -- se agregó `.markdownlint.json` con `MD024.siblings_only = true`
+  para que solo marque duplicados reales (misma sección, mismo padre), en vez de cualquier
+  encabezado repetido en todo el archivo. También se desactivó MD013 (largo de línea, límite por
+  defecto de 80) -- todo el proyecto (ROADMAP, README) envuelve el texto a mano a ~95-100
+  caracteres, no 80, y hay tablas/URLs que de cualquier forma lo exceden; no tenía caso reescribir
+  cientos de líneas ya existentes para ajustarse a un límite que nunca se siguió aquí.
+- **`diagramas/02-modulo-comparacion-imagen.md` creado (26/10/2026)**: documentación a fondo de
+  `comparacion/image_compare.py` (las dos señales de geometría que siempre se corren juntas, el
+  enmascarado del texto sobreimpreso, la tabla completa de decisión, los estados que regresa y qué
+  hace `main.py` con cada uno, las constantes/umbrales con su origen experimental). Surgió de
+  aclarar una duda del usuario sobre el orden de ejecución de `main.py` (confirmado: un solo bucle
+  por cámara, config + imagen seguidos, no dos pasadas separadas).
+  - **Hallazgo real de paso**: `_diff_contenido()` (la señal de "contenido", pensada para detectar
+    obstrucción total) se calcula en cada comparación pero sus resultados
+    (`contenido_mean`/`contenido_p95`) no se usan en la decisión de `evaluar_par()`, no se le
+    muestran al humano en la ventana de revisión, y no se guardan en `historial_comparacion` --
+    confirmado revisando `persistencia/db.py` completo. Es trabajo de CPU sin ningún efecto hoy;
+    queda anotado para cuando se diseñe la v2.
+- **Segundo problema de sintaxis Mermaid corregido (26/10/2026)**: el usuario reportó que "no
+  aparecen todos los diagramas" -- se descartó que fuera la extensión de VSCode (ya tiene instalada
+  exactamente la recomendada, `bierner.markdown-mermaid`, más `markdownlint`, sin ninguna en
+  conflicto). Encontrados dos problemas reales de sintaxis, el mismo patrón que ya había tumbado un
+  diagrama antes (22/10/2026):
+  - `01-flujo-main.md`, sección "Mapa de módulos": los IDs de nodo con punto sin comillas
+    (`comparacion.config_compare`) nunca se habían verificado visualmente después de renombrarlos
+    con las rutas nuevas de paquetes -- un punto en un ID sin comillas no es confiable entre
+    versiones del parser de Mermaid. Corregido usando IDs seguros con guion bajo
+    (`comparacion_config_compare`) y el nombre con punto solo como etiqueta visible entre comillas.
+  - `02-modulo-comparacion-imagen.md`, diagrama de decisión: símbolos `>`/`<` sueltos dentro de
+    etiquetas (`"> 15px?"`, `"< umbral?"`), fuera de un tag reconocido como `<br/>`. Corregido
+    reescribiendo la comparación en palabras ("mayor a 15px", "menor al umbral").
+- **Tercer ajuste al mismo archivo (26/10/2026)**: después del fix anterior, el diagrama de la
+  sección 4 ("La decisión") seguía sin aparecer en el visor del usuario, mientras el de la sección
+  5 sí. Causa probable: los dos diagramas de `02-modulo-comparacion-imagen.md` reutilizaban las
+  mismas letras como ID de nodo (`A`, `B`, `C`, `D`, `E`, `F`, `G`, `H`...) -- cuando dos diagramas
+  Mermaid distintos en la misma página comparten IDs, es un problema conocido (colisión de IDs en
+  el DOM/SVG generado), documentado en varias extensiones de Mermaid para VSCode. Corregido dándole
+  a cada diagrama un prefijo único en todos sus IDs (`ep_*` para el de `evaluar_par`, `cc_*` para el
+  de `compare_camera_image`) -- elimina la colisión sin importar si esa era la causa exacta. De
+  paso se quitaron comillas simples sueltas dentro de las etiquetas (otro factor de riesgo
+  innecesario, sin aportar nada).
+- **Diseño propuesto: mejoras a `comparacion/image_compare.py` (26/10/2026)**. Tras documentar el
+  módulo (`diagramas/02-modulo-comparacion-imagen.md`) se discutió a fondo dónde están sus puntos
+  ciegos reales y qué tan explotable es el perfil por cámara que Fase 3 ya dejó en la base de datos
+  sin usar (`perfil_camara.mediana_desplazamiento`/`p95_desplazamiento`/`metodo_preferido`/
+  `ultimo_recalculo`, confirmado sin lectura ni escritura en ningún lado del código vía grep
+  completo del proyecto; `n_confirmaciones_humanas` sí se escribe pero nunca se lee). El usuario
+  trajo un análisis externo (Claude para escritorio) con ideas adicionales sobre cómo distintas
+  marcas de cámara resuelven esto, que se evaluó punto por punto contra el código real de este
+  proyecto. Dos hechos del negocio/máquina cambiaron la evaluación de varias ideas:
+  - Las imágenes siempre se descargan entre 8am y 9am (hora CDMX) -- nunca hay fotos nocturnas que
+    comparar (ver `CLAUDE.local.md`). Elimina la necesidad de separar referencia día/noche.
+  - La máquina de desarrollo (`caracteristicas-equipo.md`) tiene un i9-13900HX (24 hilos) y una RTX
+    4070 Laptop (8GB VRAM reales, el reporte de 4GB es límite de WMI) -- de confirmarse que el
+    pipeline en producción corre ahí, el costo de cómputo deja de ser un obstáculo real para usar
+    un detector de objetos (YOLO/`ultralytics`) o matchers de deep learning (`kornia`), dado el
+    volumen (~270 cámaras, una vez al día). Sigue pendiente de confirmar si la tarea programada de
+    producción corre en esta misma laptop o en otra máquina sin GPU.
+  - Orden de prioridad acordado (valor/costo, de mayor a menor):
+    1. Base de referencia por **mediana de N días** por cámara (sin split día/noche) en vez de la
+       foto de un solo día -- ataca directo el problema de "las bases no son las mejores" que iba a
+       ser el motor del todo de la v2. YOLO opcional *solo al (re)construir la referencia*, para
+       limpiar objetos que se repiten en el mismo lugar en varias de las fotos muestreadas -- no
+       como paso de cada comparación diaria, para mantener el costo real bajo incluso si la
+       inferencia corriera en CPU.
+    2. **Detección de lente sucio/desenfocado** (nitidez vía Laplaciano u otra métrica simple),
+       calibrada por cámara con mediana+MAD de su propio histórico, alertando solo ante caída
+       sostenida varios días -- cubre una falla real que hoy no se detecta en absoluto (ni "se
+       movió" ni "está totalmente tapada" la ven).
+    3. **Salud absoluta de la imagen actual** (varianza/brillo/densidad de bordes muy bajos) para
+       detectar lente tapado/pintado directamente, sin depender de comparar contra la base.
+    4. **Descomponer la homografía de RANSAC** (que ya se calcula) en traslación/rotación/escala
+       medibles, en vez de solo el promedio de desplazamiento de los inliers.
+    5. **Comparar también contra el día anterior**, no solo contra la base fija de largo plazo --
+       útil especialmente en cámaras de poco textura donde la comparación contra una base de meses
+       acumula ruido.
+    6. **Set de validación aprovechando datos ya existentes**: `historial_comparacion.veredicto_humano`
+       ya es, sin saberlo, el arranque de un set etiquetado real de producción -- usarlo antes de
+       tocar cualquier umbral, en vez de partir de cero.
+    7. Matchers de deep learning (`kornia`/SuperPoint+LightGlue/LoFTR) -- ya no se descartan por
+       costo de cómputo dado el hardware, pero quedan como fase posterior, condicionados a
+       confirmar dónde corre el pipeline de producción.
+  - Se descartó agregar `scikit-image` solo para correlación de fase -- duplica una capacidad que
+    `cv2.phaseCorrelate` ya cubre, sin aportar nada nuevo.
+  - **Siguiente paso acordado**: diseñar e implementar esto paso a paso, empezando por el punto 1.
+  - **Decisiones concretas para el punto 1 (26/10/2026)**:
+    - `N_DIAS_MEDIANA_BASE = 10`, constante en `comparacion/image_compare.py`, ajustable.
+    - La mediana solo se (re)construye cuando se reemplaza la base manualmente en
+      `ui/ventana_bases.py` -- no hay recálculo periódico automático por ahora.
+    - El historial se arma reutilizando el `.jpg` que ya llega cada día (no hace falta backfill de
+      fotos viejas).
+    - Al confirmar un reemplazo de base en `ui/ventana_bases.py`, la imagen elegida se usa de
+      inmediato como base provisional (la cámara se sigue comparando normalmente desde ese mismo
+      día); a los `N_DIAS_MEDIANA_BASE` días frescos acumulados, el sistema la reemplaza solo por
+      la mediana real, sin que nadie tenga que volver a entrar a la ventana.
+  - **Paso 1 implementado (26/10/2026)**: `comparacion/image_compare.py` ahora guarda una copia
+    fechada del `.jpg` de cada cámara en `IMAGE_HISTORY_ROOT` (variable de entorno nueva, mismo
+    patrón que `IMAGE_BASE_ROOT` pero con una subcarpeta por cámara:
+    `cliente/planta/servidor/camara/AAAA-MM-DD.jpg`), con una ventana rotatoria que conserva solo
+    las `N_DIAS_MEDIANA_BASE` fotos más recientes -- por muestras guardadas, no por fecha de
+    calendario, para no castigar huecos (fin de semana, falla de descarga). Es puro trabajo de
+    infraestructura: no cambia ningún `status` ni comportamiento visible todavía, solo empieza a
+    juntar los datos que el paso 2 (construir la mediana) va a necesitar.
+    - `compare_camera_image()` ahora recibe `fecha` (opcional, por compatibilidad con llamadas
+      viejas que no la necesiten) y guarda el historial solo cuando la imagen se pudo leer
+      correctamente (evita meter `.jpg` corruptos al futuro cálculo de mediana).
+    - Conectado en los tres llamadores reales: `main.py` (corrida diaria), `scripts/
+      backfill_reportes.py` (para que el historial quede consistente también al reconstruir días
+      pasados). La demo manual de `ui/ventana_revision.py` (`__main__`) se dejó sin `fecha` a
+      propósito -- es una prueba manual puntual, no debe ensuciar el historial real.
+    - Probado con una simulación de 13 días seguidos sobre una cámara/cliente temporal (fuera del
+      árbol real), confirmando que conserva exactamente las últimas 10 y borra el resto; limpiado
+      después de la prueba.
+    - Pendiente: paso 2 (función que arme la mediana a partir de este historial) y paso 3
+      (conectarla a `ui/ventana_bases.py` con el comportamiento de "base provisional" descrito
+      arriba).
+  - **Bootstrap del historial desde el archivo real (26/10/2026)**: el usuario notó que no hace
+    falta esperar `N_DIAS_MEDIANA_BASE` días reales hacia adelante -- `CHECK_PLANTS_ROOT` ya tiene
+    meses de capturas diarias por cámara. Se descartó construir un "selector de mejores imágenes":
+    la mediana ya descarta sola una minoría de imágenes malas (objeto en cuadro, reflejo) sin
+    identificarlas una por una, que es justo el argumento original para preferirla sobre la base
+    actual -- filtrar de más sería resolver otra vez un problema que la mediana ya resuelve gratis.
+    Se decidió exigir las `N_DIAS_MEDIANA_BASE` completas antes de construir cualquier mediana
+    (nada de "mediana parcial" con menos muestras) -- más estricto, pero evita medianas poco
+    confiables para cámaras nuevas o con huecos; esas simplemente tardan más en tener una.
+    - `scripts/bootstrap_image_history.py` (nuevo): reutiliza el mismo patrón de indexado que
+      `bootstrap_image_base.py` (escanea todo `CHECK_PLANTS_ROOT`), y completa el historial de cada
+      cámara buscando hacia atrás los días más recientes que falten -- sin sobrescribir lo que ya
+      hay. Descarta imágenes corruptas o de resolución distinta a la más reciente válida de esa
+      cámara (evita mezclar fotos de antes de un cambio de cámara/lente). Cámaras sin suficiente
+      archivo real para completar las `N_DIAS_MEDIANA_BASE` quedan reportadas al final, para que se
+      sigan completando solas con las corridas normales.
+  - **Paso 2 implementado (26/10/2026)**: `construir_base_por_mediana()` en
+    `comparacion/image_compare.py` arma la mediana por píxel de las `N_DIAS_MEDIANA_BASE` imágenes
+    más recientes del historial; regresa `None` si falta alguna, si no se puede leer, o si alguna
+    tiene otra resolución -- no decide nada por su cuenta, el llamador (paso 3) decide qué hacer
+    mientras tanto. Se expuso `imread_unicode()` (antes `_imread_unicode`, privado) y se agregó
+    `fechas_en_historial()`/`historial_path()`, necesarios para que el script de bootstrap no tenga
+    que adivinar el formato interno del historial.
+    - Probado con historial sintético (cámara/cliente temporal, fuera del árbol real): menos de
+      `N_DIAS_MEDIANA_BASE` imágenes regresa `None`; con las completas e idénticas, la mediana sale
+      exactamente igual a la fuente; un archivo corrupto o con otra resolución en medio del
+      historial también regresa `None`. De paso, confirmó otra vez por qué existe
+      `imread_unicode()`: `cv2.imwrite`/`cv2.imread` directos fallan en silencio contra una ruta
+      con acentos en Windows (API ANSI) -- un intento de corromper un archivo de prueba con
+      `cv2.imwrite` no escribió nada, sin ningún error.
+  - **Bootstrap corrido contra producción (26/10/2026)**: `scripts/bootstrap_image_history.py`
+    ejecutado contra el `CHECK_PLANTS_ROOT` real. Resultado: **208 cámaras** quedaron con las 10
+    imágenes completas (listas para construir su mediana); **9 cámaras** no tienen suficiente
+    archivo real todavía (entre 3 y 9 días válidos: `AbInBev/MEDELLIN/QLYMSPROD04/{B01-C, B02-C,
+    B03, CS, P3E, P3S}`, `Api_Manzanillo/API-MANZANILLO/APIMAN-FASE1/PV-PC05`,
+    `Pemex/TAD18DEMARZO/DEMOQUA/{ENT1-Pl01, LL01-Pl01}`) -- se van a seguir completando solas con
+    las corridas normales de cada día. Total: 217 cámaras, 2120 fotos, ~509 MB en
+    `IMAGE_HISTORY_ROOT`. Los avisos de "Corrupt JPEG data" en la terminal son de la librería JPEG
+    al toparse con archivos dañados reales del archivo histórico -- se descartan solos (de ahí las
+    9 cámaras con menos de 10 días), no son errores del script.
+  - **Decisiones concretas para el punto 3 (26/10/2026)**:
+    - Estado de "promoción pendiente" en una columna nueva y dedicada (`perfil_camara
+      .base_reemplazada_el DATE`, migración `0004_base_mediana.sql`) -- en vez de reutilizar las
+      columnas viejas de Fase 3 (`metodo_preferido`, `ultimo_recalculo`), para no mezclar este tema
+      con el de calibración de umbrales por cámara (tema aparte, todavía sin empezar). `NULL`
+      significa "sin promoción pendiente".
+    - Además de conectar el flujo hacia adelante, se promovieron **de una vez** las 208 cámaras que
+      ya habían quedado con historial completo tras el bootstrap -- para no dejar ese trabajo sin
+      aprovechar hasta que a cada una le tocara pasar por un reemplazo manual.
+  - **Paso 3 implementado (26/10/2026)**:
+    - `comparacion/image_compare.py`: `imwrite_unicode()` (misma lógica que `imread_unicode` pero
+      para escribir -- `cv2.imwrite` tampoco soporta rutas con acentos en Windows, falla en
+      silencio sin excepción ni archivo escrito), `limpiar_historial_imagen()` (borra el historial
+      viejo de una cámara), y `promover_base_a_mediana()` (si ya hay historial suficiente,
+      sobreescribe la base actual con la mediana; `False` si todavía no alcanza -- no es un error).
+    - `persistencia/db.py`: `obtener_camara()` ahora también trae `base_reemplazada_el`;
+      `marcar_base_reemplazada()` la fija a hoy al confirmar un reemplazo; nueva
+      `limpiar_base_reemplazada()` la apaga una vez promovida.
+    - `ui/ventana_bases.py`: al confirmar un reemplazo, además de `save_base()` (sin cambios), se
+      limpia el historial viejo de esa cámara y se guarda la imagen elegida como día 1 del
+      historial fresco -- para que la futura mediana no mezcle fotos de antes del arreglo.
+    - `main.py`: en el bucle diario, si `perfil["base_reemplazada_el"]` no es `NULL`, intenta
+      `promover_base_a_mediana()` después de procesar la imagen del día; si ya hay suficiente
+      historial, promueve y apaga la marca -- sin que nadie tenga que volver a entrar a
+      `ventana_bases.py`. Si todavía no alcanza, no hace nada y lo vuelve a intentar al día
+      siguiente.
+    - Probado de punta a punta contra la base de datos real con una cámara/cliente desechable
+      (creada y borrada en la misma prueba): `base_reemplazada_el` arranca en `NULL`,
+      `marcar_base_reemplazada()` la fija a hoy, `promover_base_a_mediana()` regresa `False` sin
+      historial y `True` con las 10 completas (la base queda escrita con la forma correcta), y
+      `limpiar_base_reemplazada()` la apaga otra vez.
+    - **Incidente de paso, resuelto**: al aplicar la migración `0004`, `migrate.py` se quedó
+      colgado -- una conexión vieja (`pid` en PostgreSQL) llevaba **~8.8 horas "idle in
+      transaction"** desde una consulta anterior sobre `Api_Manzanillo`, bloqueando el lock
+      exclusivo que necesita un `ALTER TABLE`. Confirmado con el usuario antes de tocar nada;
+      cerrada con `pg_terminate_backend()`, y la migración corrió sin problema después. Vale la
+      pena recordar: si una migración futura se cuelga sin motivo aparente, revisar primero
+      `pg_stat_activity` por conexiones viejas "idle in transaction" antes de asumir otra causa.
+    - `scripts/promover_bases_pendientes.py` (nuevo, de una sola vez): recorre todas las cámaras de
+      `IMAGE_BASE_ROOT` y promueve cualquiera con historial ya completo, sin depender de
+      `base_reemplazada_el` (pensado para aprovechar el bootstrap, no para el flujo normal).
+      Corrido contra producción: **208 bases promovidas a mediana**, **9 sin suficiente historial
+      todavía** (las mismas 9 cámaras del bootstrap) -- se completarán solas con las corridas
+      normales. Verificado releyendo varias bases promovidas al azar: siguen siendo `.jpg` válidos
+      y legibles, con la resolución correcta.
+    - Con esto, los pasos 1-3 del diseño quedan completos e implementados. Pendiente: los puntos
+      2-6 restantes del orden de prioridad acordado (detección de lente sucio/desenfocado, salud
+      absoluta de imagen, desplazamiento descompuesto de RANSAC, comparación contra el día
+      anterior, aprovechar `veredicto_humano` como validación) -- sin empezar todavía.
+  - **Punto 2 implementado: detección de lente sucio/desenfocado (26/10/2026)**. Cubre una falla
+    que hoy no detectaba nada (ni ORB/fase ni la diferencia de contenido): el lente se ensucia o
+    desenfoca gradualmente, sin que la cámara se haya movido.
+    - **Decisiones de diseño confirmadas**: se reutiliza el mecanismo existente de `REVISAR`/morado
+      con un motivo distinto ("lente sucio/desenfocado"), en vez de crear un estado nuevo del
+      semáforo -- menos superficie de cambio (nada que tocar en el PDF ni en el reporte). Exige las
+      `N_DIAS_MEDIANA_BASE` completas del historial para evaluar, igual que
+      `construir_base_por_mediana` -- consistente con esa misma regla ya establecida.
+    - `comparacion/image_compare.py`: `_nitidez()` (varianza del Laplaciano sobre la imagen con las
+      esquinas tapadas -- igual que ORB/fase, para que el texto sobreimpreso, siempre nítido, no
+      enmascare un lente realmente borroso) y `evaluar_nitidez()` (compara la nitidez de hoy contra
+      la mediana + MAD de las 10 imágenes del historial de esa cámara -- reutiliza el mismo
+      historial de la base por mediana, no hace falta guardar nada aparte). Usa MAD en vez de
+      desviación estándar por ser robusta a que algún día del historial ya haya sido borroso.
+      Umbral: más de `UMBRAL_MAD_NITIDEZ = 3.5` desviaciones MAD por debajo de la mediana
+      (convención de Iglewicz & Hoaglin para outliers robustos) -- constante ajustable, sin
+      validar todavía contra datos reales (mismo espíritu que `MIN_CONF_FASE`, marcado como
+      pendiente de recalibrar en su momento).
+    - `persistencia/db.py`: nuevo contador `dias_borroso_consecutivos` (mismo patrón que
+      `dias_no_concluyente_consecutivos`), nueva constante `DIAS_BORROSO_PARA_REVISION = 3`.
+      `_siguiente_estado()` ahora recibe `fuerza_revision_borrosa` -- aunque la geometría diga
+      `OK`, una nitidez sospechosa sostenida esos 3 días manda a morado igual que un `REVISAR`
+      normal. `guardar_resultado()` calcula esa bandera internamente y guarda los valores crudos de
+      nitidez en `historial_comparacion` (nuevas columnas `nitidez_actual`,
+      `nitidez_mediana_historica`, `nitidez_mad_historica`, `nitidez_sospechosa`) para poder
+      revisar/recalibrar después con datos reales -- migraciones `0004_base_mediana.sql` y
+      `0005_nitidez_lente.sql`.
+    - `main.py`: abre la ventana de revisión también cuando la nitidez lleva sospechosa
+      `DIAS_BORROSO_PARA_REVISION` días seguidos (aunque el estado geométrico sea `OK`), con un
+      diagnóstico que ahora incluye la nitidez de hoy contra la mediana histórica; el mensaje de
+      "CONFIRMADO" al veredicto humano distingue si fue por movimiento o por lente sucio/borroso.
+    - `scripts/backfill_reportes.py` actualizado para no quedar desincronizado (mismo patrón de
+      congelar/incrementar/reiniciar la racha, mismo paso de `fuerza_revision_borrosa` a
+      `_siguiente_estado`).
+    - Probado de punta a punta: `evaluar_nitidez` con historial sintético (sin suficiente historial
+      -> `None`; imagen idéntica al historial -> no sospechosa; imagen deliberadamente desenfocada
+      con `cv2.GaussianBlur` contra un historial nítido -> sospechosa); `_siguiente_estado` con los
+      cuatro casos relevantes (OK normal, OK+nitidez sostenida, REVISAR normal, veredicto humano
+      manda sin importar nitidez); y `guardar_resultado` de punta a punta contra la base de datos
+      real con una cámara desechable -- 3 días seguidos de nitidez sospechosa escalan a morado
+      exactamente al tercero, igual que diseñado.
+  - **Punto 3 implementado: salud absoluta de imagen (26/10/2026)**. Detecta obstrucción total del
+    lente (algo puesto directamente encima) de forma directa e inmediata, sin comparar contra nada
+    -- a diferencia de la nitidez (punto 2, necesita 10 días de historial) o `_diff_contenido`
+    (necesita una base). Funciona desde el primer día de una cámara nueva.
+    - **Validado contra datos reales antes de fijar umbrales** (en vez de inventar números):
+      midiendo varianza/brillo (escala de grises, esquinas tapadas igual que ORB/nitidez) sobre las
+      217 cámaras reales de producción, el peor caso legítimo encontrado fue varianza 32.4 / brillo
+      26.6 (escena nocturna de poca textura). Una obstrucción total simulada (imagen casi uniforme)
+      dio varianza ~1.9. Con ese margen real: `UMBRAL_VARIANZA_MINIMA = 15.0`,
+      `UMBRAL_BRILLO_MINIMO = 15.0`, `UMBRAL_BRILLO_MAXIMO = 240.0`. De paso se confirmó que esta
+      señal **no** sirve para desenfoque gradual (un empañado fuerte simulado con `GaussianBlur`
+      grande siguió dando varianza alta, ~1543) -- son señales complementarias, no una reemplaza a
+      la otra.
+    - **Disparo inmediato, no sostenido** (a diferencia de la nitidez): una obstrucción total no es
+      ambigua como un desenfoque gradual, así que no hace falta esperar varios días -- un solo día
+      sospechoso ya manda a morado. No necesitó contador nuevo en `perfil_camara` por esto mismo.
+    - `comparacion/image_compare.py`: `evaluar_salud_imagen()`, calculada siempre que la imagen se
+      pudo leer (incluso en `BASE CREADA`/`BASE DESACTUALIZADA`, a diferencia de la nitidez, que
+      solo corre en la comparación normal).
+    - `persistencia/db.py`: `_siguiente_estado()` ahora también recibe `fuerza_revision_salud`;
+      `guardar_resultado()` guarda `salud_varianza`/`salud_brillo`/`salud_sospechosa` en
+      `historial_comparacion` (migración `0006_salud_imagen.sql`).
+    - `main.py`: abre la ventana también ante salud sospechosa (aunque sea el primer día), con un
+      mensaje de "CONFIRMADO" distinto ("posible lente tapado/obstruido") cuando es esa la causa.
+      `scripts/backfill_reportes.py` actualizado igual.
+    - **Quirk conocido, aceptado por ahora**: si el primer `.jpg` de una cámara nueva (`BASE
+      CREADA`) ya sale obstruido, la ventana de revisión compara la imagen contra sí misma (la
+      base recién creada es esa misma foto) -- funcionalmente correcto (el humano igual nota el
+      problema a simple vista y puede marcar "Base desactualizada"), pero visualmente redundante.
+      No se resolvió en esta iteración por mantener el cambio acotado.
+    - Probado con una imagen real (no sospechosa), una obstrucción simulada y una imagen muy
+      oscura simuladas (ambas sospechosas), y de punta a punta contra la base de datos real con una
+      cámara desechable: un solo día con salud sospechosa ya escala a morado, sin esperar varios
+      días.
+  - **Punto 4 implementado: desplazamiento de RANSAC descompuesto (26/10/2026)**. En vez de solo el
+    promedio de distancia entre puntos inlier (`orb_desp`, que no distingue un giro de un
+    desplazamiento lineal), se traduce la misma información a traslación (`orb_tx`/`orb_ty` en
+    píxeles), rotación (`orb_rotacion_deg`) y escala (`orb_escala`) -- medibles, no solo "se movió
+    tanto". **Puramente informativo**: no cambia la decisión `OK`/`REVISAR` existente (`orb_desp`
+    sigue siendo el que se compara contra el umbral), solo enriquece el diagnóstico que ve el
+    humano y lo que se guarda para análisis futuro.
+    - `comparacion/image_compare.py`: `_descomponer_transformacion()` ajusta una transformación de
+      similitud (traslación + rotación + escala uniforme, `cv2.estimateAffinePartial2D`) sobre los
+      mismos puntos inlier que ya filtró el RANSAC de la homografía -- no hace falta volver a
+      detectar nada. Se prefirió una similitud (4 grados de libertad) sobre descomponer la
+      homografía proyectiva completa (8 grados de libertad): el movimiento real de una cámara de
+      seguridad (pan/tilt/giro) se explica bien así, y es más simple de interpretar.
+    - **Validado matemáticamente** antes de dar por buena: con dos imágenes idénticas, la
+      transformación recuperada es la identidad exacta (tx=ty=0, rotación=0°, escala=1.0); con una
+      transformación afín construida a mano con parámetros conocidos (tx=15, ty=-8, rotación=3°,
+      escala=1.02) aplicada de verdad a una imagen real con `cv2.warpAffine`, los valores
+      recuperados salieron prácticamente exactos (diferencia menor a 0.01 en todos). (Una primera
+      prueba usando `cv2.getRotationMatrix2D`, que rota alrededor del centro de la imagen en vez
+      del origen, dio traslaciones recuperadas que no coincidían con la intuición -- no era un
+      error del código, sino que esa construcción mezcla la rotación-alrededor-del-centro con la
+      traslación explícita en la parametrización origen-relativa que se recupera; quedó descartada
+      como forma de validar y se reemplazó por la matriz afín construida a mano.)
+    - `persistencia/db.py`: nuevas columnas en `historial_comparacion` (migración
+      `0007_orb_transformacion.sql`); `main.py` las muestra en el diagnóstico de la ventana de
+      revisión ("ORB detallado: traslación (x, y) px, rotación X°, escala Y").
+    - Probado de punta a punta contra la base de datos real con una cámara desechable: los cuatro
+      valores se guardan y se leen exactamente igual a como se calcularon.
+  - **Punto 5 implementado: comparación contra el día anterior (26/10/2026)**. Compara la imagen de
+    hoy contra la más reciente guardada en el historial -- no contra la base fija de largo plazo --
+    reutilizando `evaluar_par()` tal cual, sin lógica nueva de comparación. **Decisiones
+    confirmadas**: puramente informativa por ahora (no cambia `OK`/`REVISAR`/`NO CONCLUYENTE` --
+    primero se junta evidencia real de qué tan bien funciona antes de dejarla influir en algo, ni
+    siquiera para "rescatar" un `NO CONCLUYENTE`); "el día anterior" es la foto más reciente que ya
+    estaba en el historial, sin importar hace cuántos días (robusto a huecos de fin de semana o
+    fallas de conexión), no estrictamente el día calendario anterior.
+    - `comparacion/image_compare.py`: `evaluar_dia_anterior()`. Debe llamarse **antes** de que
+      `guardar_historial_imagen()` guarde la foto de hoy -- si no, "la más reciente del historial"
+      terminaría siendo la foto de hoy comparada contra sí misma. Se reordenó `compare_camera_image`
+      para calcularla primero.
+    - `persistencia/db.py`: nuevas columnas en `historial_comparacion` (migración
+      `0008_dia_anterior.sql`); `main.py` las muestra en el diagnóstico de la ventana de revisión.
+    - Probado con historial sintético de 2 días (misma imagen ambos días): el primer día no hay
+      "día anterior" todavía (`None`, historial vacío); el segundo día sí compara correctamente
+      contra el primero (no contra sí mismo) y da `OK`. Probado también de punta a punta contra la
+      base de datos real con una cámara desechable.
+    - Con esto, los 5 puntos técnicos del plan de mejoras a `image_compare.py` quedan completos.
+      Pendiente, sin empezar: el punto 6 (aprovechar `historial_comparacion.veredicto_humano`, que
+      ya es sin saberlo el arranque de un set de validación real, para evaluar qué tan bien están
+      funcionando estas señales antes de tocar cualquier umbral o decidir si alguna de las nuevas
+      señales informativas -- rotación/escala, salud, día anterior -- debería empezar a influir en
+      la decisión).
+  - **Punto 6 (primer análisis): validación con `veredicto_humano` real (26/10/2026)**.
+    **Corrección de alcance importante**: la persistencia en base de datos (Fase 3) arrancó el
+    21/10/2026, no desde inicio de octubre -- el "mes completo" que se asumía al principio en
+    realidad son 6 días reales (21 al 26/10) y 1060 filas en `historial_comparacion`. Las 5 señales
+    nuevas de este mismo día (nitidez, salud, rotación/escala, día anterior) todavía no tienen
+    ningún historial real -- se acaban de activar hoy, así que este primer análisis solo pudo
+    usar las señales originales (ORB/fase) + veredicto humano.
+    - `scripts/analizar_veredictos.py` (nuevo, reutilizable): agrupa `historial_comparacion` por
+      `veredicto_humano` y muestra estadísticas básicas de cada señal -- pensado para correrse
+      periódicamente conforme se acumulen más días, no como análisis de una sola vez.
+    - **Datos reales disponibles**: 65 veredictos humanos (61 "bien", 2 "mal", 2 "desactualizada").
+      Muestra chica -- insuficiente para recalibrar umbrales con rigor estadístico (solo 4 casos
+      confirmados como problema real), pero suficiente para un primer vistazo cualitativo real.
+    - **Hallazgo 1 -- confirma la necesidad de calibración por cámara, con números concretos**: de
+      los 61 "bien" (falsos positivos confirmados), la mediana de `orb_desplazamiento` es 37.6px --
+      muy por encima del umbral global (~6-7px para una imagen de ~2700px de ancho al 0.25%).
+      `AbInBev/B04` salió "bien" dos veces con 57.8px y 272.4px; `AbInBev/N2p` salió "bien" tres
+      veces seguidas con 15.99px, 18.09px y 22.71px -- un patrón consistente por cámara, exactamente
+      lo que predijo el Experimento 8 (misma rotación física produce mucho más desplazamiento en
+      píxeles en una escena cercana que en una lejana). Es evidencia real, no solo teórica, de por
+      qué `umbral_para()` sigue siendo un punto de enganche pendiente.
+    - **Hallazgo 2 -- cúmulo inusual de `NO CONCLUYENTE` el 26/10/2026**: una veintena de cámaras de
+      AbInBev (`B02`, `B03`, `B05`, `B09`, `NF1-4`, `EN1`, `EX`, `P1-2`, `C1-5`, `E1-3`, `AD1r1`...)
+      con 0-13 inliers ORB cada una ese mismo día, todas confirmadas "bien". Parece un problema
+      puntual de ese día/cliente (iluminación, condiciones de captura), no ruido disperso aleatorio
+      -- queda anotado para seguirle la pista si se repite en próximos días.
+    - **Hallazgo 3 -- valida el diseño ya existente con un caso real concreto**: los 2 casos "mal"
+      confirmados comparten un patrón -- desplazamiento ORB enorme (129px y 726px) con la
+      correlación de fase reportando casi cero movimiento (mediana 0.1px) y sin confianza
+      suficiente (`fase_conf` 0.12 y 0.05, ambos bajo `MIN_CONF_FASE`). En el caso con pocos
+      inliers ORB (`PV-PC01`, solo 8, bajo `MIN_INLIERS`), **ningún método individual fue
+      "confiable"** -- lo rescató exclusivamente la escalada de `NO CONCLUYENTE` a los 3 días
+      (pedido 22/10/2026). Sin esa regla, este problema real se habría quedado invisible
+      indefinidamente. No se encontró ningún bug en la lógica de decisión -- el sistema ya se
+      comportó como se diseñó en ambos casos reales disponibles.
+    - **Conclusión y siguiente paso**: no se tocó ningún umbral todavía -- 4 casos confirmados es
+      muy poco para recalibrar con confianza, y hacerlo ahora sería adivinar, no medir. Se deja
+      `scripts/analizar_veredictos.py` como práctica recurrente: repetirlo conforme se acumulen más
+      días (y, en unas semanas, con las 5 señales nuevas ya con historial real) antes de decidir si
+      alguna debería empezar a influir en la decisión, o si por fin vale la pena activar la
+      calibración por cámara en `umbral_para()`.
+  - **`umbral_para()` conectado a `perfil_camara` por fin (26/10/2026)**. El usuario preguntó
+    directamente si los umbrales por cámara ya se ajustaban solos -- la respuesta honesta era que
+    no: `umbral_para()` seguía siendo el mismo punto de enganche sin terminar desde Fase 3/4, y el
+    análisis de veredictos de hace un momento acababa de confirmar con números reales (`B04`,
+    `N2p`) que hacía falta. Se decidió conectarlo ahora mismo, reutilizando las columnas
+    `mediana_desplazamiento`/`p95_desplazamiento`/`ultimo_recalculo` que ya existían desde
+    `0001_init.sql` sin usarse -- no hizo falta ninguna migración nueva.
+    - **Decisiones de diseño confirmadas**:
+      - El umbral por cámara (`p95_desplazamiento`) solo puede hacer a una cámara **menos**
+        sensible que el umbral global, nunca más -- si el p95 calculado sale por debajo del
+        global, se usa el global. Evita introducir una clase nueva de falsos positivos en cámaras
+        tranquilas con poco historial calibrado todavía.
+      - Mínimo de **20 lecturas** (ORB + fase combinadas, de días `OK` o `REVISAR` confirmados
+        como "bien" por un humano) antes de confiar en el cálculo para una cámara -- por debajo de
+        eso, sigue usando el global. Se excluyen explícitamente los días confirmados como
+        movimiento real (`mal`) o base desactualizada (`desactualizada`) -- esos no son "ruido
+        normal", son justo lo que se quiere seguir detectando.
+      - "Normal" se define como `imagen_status = 'OK'` **o** `veredicto_humano = 'bien'` -- no
+        solo `OK`, porque excluir los `REVISAR` que resultaron ser falsos positivos confirmados
+        dejaría fuera justo la evidencia más valiosa (la de cámaras como `B04`/`N2p`, que
+        necesitan calibración porque *frecuentemente* disparan `REVISAR` con ruido normal alto).
+    - **Refactor de contrato, sin cambiar el comportamiento histórico**: `umbral_para()` pasó de
+      regresar un porcentaje del ancho (y recibir `cliente/planta/servidor/camara` para una
+      consulta a la base de datos que nunca llegó a existir) a recibir el ancho de la imagen y un
+      valor ya calibrado en píxeles (o `None`), devolviendo directamente el umbral en píxeles --
+      más simple, y respeta que `comparacion/image_compare.py` sigue sin tocar la base de datos
+      (el llamador, `main.py`, decide el valor calibrado y lo pasa). `evaluar_par()` y
+      `evaluar_dia_anterior()` actualizados para recibir el mismo valor calibrado en vez de un
+      porcentaje -- confirmado que no quedó ningún llamador externo usando el contrato viejo
+      (grep de todo el proyecto).
+    - `persistencia/db.py`: nueva `recalcular_perfiles_estadisticos(conn)`, pensada para correrse
+      **una vez al final de cada corrida de `main.py`** (nunca a mitad de la corrida del mismo día,
+      para no calibrar con datos de hoy que todavía no se terminaron de verificar hoy mismo) --
+      conectada justo después del bucle principal. `obtener_camara()` ahora también trae
+      `p95_desplazamiento`, que `main.py` pasa a `compare_camera_image()`.
+    - **Probado exhaustivamente antes de confiar en el mecanismo**:
+      - Con datos sintéticos (cámara desechable): menos de 20 muestras no calibra; con exactamente
+        20, calibra, y un valor `mal=5000px` incluido a propósito quedó correctamente excluido del
+        cálculo (confirma que el filtro de exclusión funciona, no solo el de inclusión).
+      - `umbral_para()` directo: un p95 calibrado menor al global se ignora (se queda en el
+        global); uno mayor sí se usa.
+      - Punta a punta con una transformación real de 40px (similar al ruido real visto en
+        `B04`/`N2p`): sin calibrar da `REVISAR`; con un umbral calibrado de 50px da `OK` -- el
+        caso exacto que se buscaba resolver.
+      - **Corrido contra producción real**: `recalcular_perfiles_estadisticos()` recalibró
+        **0 cámaras** -- ninguna cámara real individual (identidad completa cliente/planta/
+        servidor/cámara) llega todavía a 20 muestras calificadas (el máximo real es 8, incluyendo
+        `N2p`). Es el resultado correcto y esperado con solo 5-6 días de datos reales -- ni
+        siquiera `B04`/`N2p` se aflojan todavía, exactamente como debe ser dado lo poco que hay
+        acumulado. Una consulta de diagnóstico preliminar había sugerido falsamente que 3 cámaras
+        ya calificaban (`EP1`, `AD1p`, `AD1r1`) -- resultó ser un error de esa consulta (agrupaba
+        por nombre de cámara sin incluir planta/servidor, mezclando cámaras físicas distintas que
+        comparten nombre corto), no un problema del código de producción.
+    - **Respuesta a la pregunta original del usuario**: no, los umbrales no se ajustaban solos
+      hasta hoy -- la nitidez (punto 2) sí era autocalibrada desde que se implementó, pero el
+      umbral de movimiento (el que decide `OK` vs `REVISAR`) seguía siendo 100% global. A partir de
+      ahora sí se ajusta solo, cámara por cámara, conforme se acumulen suficientes días reales de
+      cada una -- se espera ver a `B04`/`N2p` calibrarse en las próximas ~1-2 semanas conforme
+      lleguen a las 20 muestras.

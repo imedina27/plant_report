@@ -28,7 +28,7 @@ from comparacion.config_compare import compare_camera_config
 from comparacion.image_compare import compare_camera_image
 from integraciones.monit_client import temperaturas_promedio_dia, uso_disco_actual
 from main import _camaras_del_dia
-from persistencia.db import _siguiente_estado
+from persistencia.db import DIAS_BORROSO_PARA_REVISION, _siguiente_estado
 from reporte.datos_reporte import _clasificar_falla
 from reporte.reporte_ejecutivo import ResumenServidor, construir_pdf
 
@@ -39,7 +39,8 @@ SALIDA_ROOT = Path(__file__).parent.parent / "Reportes_Backfill"
 
 
 def main() -> None:
-    # (cliente, planta, servidor, camara) -> {"estado_actual", "dias_no_concluyente_consecutivos"}
+    # (cliente, planta, servidor, camara) ->
+    #   {"estado_actual", "dias_no_concluyente_consecutivos", "dias_borroso_consecutivos"}
     perfiles: dict[tuple[str, str, str, str], dict] = {}
     resumen_por_dia: list[tuple[date, int, int]] = []  # (fecha, total_camaras, total_fallas)
 
@@ -57,7 +58,9 @@ def main() -> None:
         for cliente, planta, servidor, camara, json_path, jpg_path in camaras:
             clave = (cliente, planta, servidor, camara)
             perfil = perfiles.setdefault(
-                clave, {"estado_actual": "verde", "dias_no_concluyente_consecutivos": 0},
+                clave,
+                {"estado_actual": "verde", "dias_no_concluyente_consecutivos": 0,
+                 "dias_borroso_consecutivos": 0},
             )
             log_info = logs_por_servidor.get((cliente, planta, servidor), {}).get(camara)
 
@@ -70,13 +73,21 @@ def main() -> None:
             if jpg_path is not None:
                 ya_desactualizada = perfil["estado_actual"] == "base_desactualizada"
                 imagen_result = compare_camera_image(
-                    jpg_path, cliente, planta, servidor, camara, ya_desactualizada,
+                    jpg_path, cliente, planta, servidor, camara, ya_desactualizada, fecha,
                 )
 
             imagen_status = imagen_result["status"] if imagen_result else None
+            nitidez_sospechosa = imagen_result.get("nitidez_sospechosa") if imagen_result else None
+            salud_sospechosa = imagen_result.get("salud_sospechosa") if imagen_result else None
+            fuerza_revision_borrosa = (
+                nitidez_sospechosa is True
+                and perfil["dias_borroso_consecutivos"] + 1 >= DIAS_BORROSO_PARA_REVISION
+            )
+            fuerza_revision_salud = salud_sospechosa is True
             nuevo_estado = _siguiente_estado(
                 perfil["estado_actual"], imagen_status, None,
-                perfil["dias_no_concluyente_consecutivos"],
+                perfil["dias_no_concluyente_consecutivos"], fuerza_revision_borrosa,
+                fuerza_revision_salud,
             )
             # Misma lógica que db.guardar_resultado() -- un día sin imagen (ej. falla de conexión)
             # congela la racha en vez de reiniciarla.
@@ -86,7 +97,16 @@ def main() -> None:
                 nuevos_dias = perfil["dias_no_concluyente_consecutivos"]
             else:
                 nuevos_dias = 0
-            perfiles[clave] = {"estado_actual": nuevo_estado, "dias_no_concluyente_consecutivos": nuevos_dias}
+            if nitidez_sospechosa is None:
+                nuevos_dias_borroso = perfil["dias_borroso_consecutivos"]
+            elif nitidez_sospechosa:
+                nuevos_dias_borroso = perfil["dias_borroso_consecutivos"] + 1
+            else:
+                nuevos_dias_borroso = 0
+            perfiles[clave] = {
+                "estado_actual": nuevo_estado, "dias_no_concluyente_consecutivos": nuevos_dias,
+                "dias_borroso_consecutivos": nuevos_dias_borroso,
+            }
 
             filas_por_servidor.setdefault((cliente, planta, servidor), []).append({
                 "camara": camara,

@@ -17,10 +17,11 @@ de datos (ver ROADMAP.md, secciones 2.8 y 3) -- ya no se escanean archivos marca
 from __future__ import annotations
 
 import tkinter as tk
+from datetime import date
 from pathlib import Path
 from tkinter import filedialog
 
-from comparacion.image_compare import IMAGE_BASE_ROOT, save_base
+from comparacion.image_compare import IMAGE_BASE_ROOT, guardar_historial_imagen, limpiar_historial_imagen, save_base
 from persistencia import db
 from ui.ventana_revision import (
     ACENTO,
@@ -227,6 +228,13 @@ class VentanaBases:
             return
         cliente, planta, servidor, camara = datos
         save_base(cliente, planta, servidor, camara, self._ruta_candidata)
+
+        # Arranca el historial fresco desde cero -- ver ROADMAP.md, 26/10/2026, paso 3: una vez
+        # que se junten N_DIAS_MEDIANA_BASE días desde hoy, main.py promueve esta base provisional
+        # a una mediana real, sin que nadie tenga que volver a entrar aquí.
+        limpiar_historial_imagen(cliente, planta, servidor, camara)
+        guardar_historial_imagen(cliente, planta, servidor, camara, self._ruta_candidata, date.today())
+
         db.marcar_base_reemplazada(self._conn, cliente, planta, servidor, camara)
         self._refrescar_lista()
         _dialogo_info(

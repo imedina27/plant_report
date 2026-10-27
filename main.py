@@ -4,7 +4,7 @@ from datetime import date, datetime
 from pathlib import Path
 
 from comparacion.config_compare import CHECK_PLANTS_ROOT, compare_camera_config
-from comparacion.image_compare import base_path, compare_camera_image
+from comparacion.image_compare import base_path, compare_camera_image, promover_base_a_mediana
 from comparacion.log_parse import parsear_log_servidor
 from integraciones.correo import enviar_reportes
 from persistencia import db
@@ -62,11 +62,34 @@ def _formatear_diagnostico(r: dict) -> str:
     def fmt(valor, sufijo=""):
         return f"{valor:.1f}{sufijo}" if valor is not None else "N/D"
 
-    return (
-        f"{r['motivo']}\n"
+    lineas = [
+        r["motivo"] or "revisión forzada (ver nitidez/salud abajo)",
         f"ORB: {r['orb_inliers']} inliers, {fmt(r['orb_desp'], ' px')}      "
-        f"Fase: confianza {fmt(r['fase_conf'])}, {fmt(r['fase_desp'], ' px')}"
-    )
+        f"Fase: confianza {fmt(r['fase_conf'])}, {fmt(r['fase_desp'], ' px')}",
+    ]
+    if r.get("orb_tx") is not None:
+        lineas.append(
+            f"ORB detallado: traslación ({fmt(r['orb_tx'])}, {fmt(r['orb_ty'])}) px, "
+            f"rotación {fmt(r['orb_rotacion_deg'], '°')}, escala {fmt(r['orb_escala'])}"
+        )
+    if r.get("nitidez_hoy") is not None:
+        sospechosa = " (SOSPECHOSA)" if r.get("nitidez_sospechosa") else ""
+        lineas.append(
+            f"Nitidez: {fmt(r['nitidez_hoy'])} hoy vs. mediana histórica "
+            f"{fmt(r['nitidez_mediana_hist'])}{sospechosa}"
+        )
+    if r.get("salud_varianza") is not None:
+        sospechosa = " (SOSPECHOSA)" if r.get("salud_sospechosa") else ""
+        lineas.append(
+            f"Salud: varianza {fmt(r['salud_varianza'])}, brillo {fmt(r['salud_brillo'])}"
+            f"{sospechosa}"
+        )
+    if r.get("diaanterior_status") is not None:
+        lineas.append(
+            f"Vs. día anterior: {r['diaanterior_status']} -- ORB {fmt(r['diaanterior_orb_desp'], ' px')}, "
+            f"Fase {fmt(r['diaanterior_fase_desp'], ' px')}"
+        )
+    return "\n".join(lineas)
 
 
 def main() -> None:
@@ -139,7 +162,8 @@ def main() -> None:
         if jpg_path is not None:
             ya_desactualizada = perfil["estado_actual"] == "base_desactualizada"
             imagen_result = compare_camera_image(
-                jpg_path, cliente, planta, servidor, camara, ya_desactualizada,
+                jpg_path, cliente, planta, servidor, camara, ya_desactualizada, fecha,
+                perfil["p95_desplazamiento"],
             )
             detalle = f" ({imagen_result['motivo']})" if imagen_result["motivo"] else ""
             partes.append(f"imagen: {imagen_result['status']}{detalle}")
@@ -148,7 +172,20 @@ def main() -> None:
                 imagen_result["status"] == "NO CONCLUYENTE"
                 and perfil["dias_no_concluyente_consecutivos"] + 1 >= db.DIAS_AMARILLO_PARA_REVISION
             )
-            if (imagen_result["status"] == "REVISAR" or fuerza_revision) and ventana is not None:
+            solo_por_nitidez = (
+                imagen_result["status"] not in ("REVISAR",) and not fuerza_revision
+                and imagen_result.get("nitidez_sospechosa") is True
+                and perfil["dias_borroso_consecutivos"] + 1 >= db.DIAS_BORROSO_PARA_REVISION
+            )
+            solo_por_salud = (
+                imagen_result["status"] not in ("REVISAR",) and not fuerza_revision
+                and not solo_por_nitidez
+                and imagen_result.get("salud_sospechosa") is True
+            )
+            if (
+                imagen_result["status"] == "REVISAR" or fuerza_revision or solo_por_nitidez
+                or solo_por_salud
+            ) and ventana is not None:
                 if perfil["estado_actual"] == "rojo":
                     # Incidencia ya confirmada -- no se vuelve a preguntar (ROADMAP.md, sección 2.7)
                     partes.append("incidencia ya confirmada, sigue abierta")
@@ -161,7 +198,13 @@ def main() -> None:
                     if veredicto_humano == "desactualizada":
                         partes.append("base marcada como desactualizada")
                     elif veredicto_humano == "mal":
-                        partes.append("CONFIRMADO: cámara movida")
+                        if solo_por_salud:
+                            motivo_mal = "posible lente tapado/obstruido (salud de imagen)"
+                        elif solo_por_nitidez:
+                            motivo_mal = "lente sucio/desenfocado"
+                        else:
+                            motivo_mal = "cámara movida"
+                        partes.append(f"CONFIRMADO: {motivo_mal}")
                     else:
                         partes.append("marcado como falso positivo")
                     if observacion:
@@ -172,15 +215,26 @@ def main() -> None:
         else:
             partes.append("imagen: SIN ARCHIVO")
 
+        if perfil["base_reemplazada_el"] is not None:
+            # Base provisional en espera de suficiente historial fresco -- ver ROADMAP.md,
+            # 26/10/2026, paso 3. No hacer nada si todavía no alcanza (no es un error).
+            if promover_base_a_mediana(cliente, planta, servidor, camara):
+                db.limpiar_base_reemplazada(conn, cliente, planta, servidor, camara)
+                partes.append("base provisional promovida a mediana")
+
         nuevo_estado = db.guardar_resultado(
             conn, perfil["id"], fecha, perfil["estado_actual"],
             perfil["dias_no_concluyente_consecutivos"],
             config_result, imagen_result, veredicto_humano, modo, log_info,
+            perfil["dias_borroso_consecutivos"],
         )
         if nuevo_estado != perfil["estado_actual"]:
             partes.append(f"estado: {perfil['estado_actual']} -> {nuevo_estado}")
 
         print("  - " + "  |  ".join(partes))
+
+    recalibradas = db.recalcular_perfiles_estadisticos(conn)
+    print(f"Umbrales de movimiento recalibrados por cámara: {recalibradas}")
 
     if ventana is not None:
         # Se cierra aquí, no al final -- lo que sigue (generar/enviar reporte) se contesta desde la

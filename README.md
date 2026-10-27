@@ -58,6 +58,7 @@ copy .env.example .env
 | `CHECK_PLANTS_ROOT` | Carpeta raíz donde el programa externo de revisión deja los `.log`, imágenes y `.json` de configuración, con la estructura `[Cliente]\[Mes]\[ddmmyy]\[Planta]\[Servidor]\`. |
 | `CONFIG_BASE_ROOT` | Configuración "base" de referencia de cada cámara (`[Cliente]\[Planta]\[Servidor]\[Cámara].json`). Se crea sola la primera vez que se procesa una cámara sin base. |
 | `IMAGE_BASE_ROOT` | Imagen "base" de referencia de cada cámara (`[Cliente]\[Planta]\[Servidor]\[Cámara].jpg`). También se crea sola la primera vez. |
+| `IMAGE_HISTORY_ROOT` | Copia fechada del `.jpg` de cada cámara, últimos 10 días (`[Cliente]\[Planta]\[Servidor]\[Cámara]\[AAAA-MM-DD].jpg`). Se llena sola; pensada para construir más adelante una base por mediana en vez de la foto de un solo día (ver ROADMAP.md). |
 | `REPORTES_ROOT` | Carpeta donde se guardan los PDFs del reporte ejecutivo, uno por cliente: `REPORTES_ROOT\[Cliente]\[DDMMYYYY]_[Cliente].pdf`. |
 | `DB_HOST` / `DB_PORT` / `DB_NAME` / `DB_USER` / `DB_PASSWORD` | Conexión a PostgreSQL. |
 | `MONIT_API_URL` | URL base de la API de `Monit_Servers_V2` (proyecto hermano), para traer temperatura CPU/GPU y uso de disco de cada servidor. Si un servidor no existe ahí, o si la API no responde (caída, sin VPN, etc.), el reporte muestra "Sin datos" sin bloquear nada. |

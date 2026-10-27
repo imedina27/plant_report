@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import datetime
 import os
+import statistics
 
 import psycopg2
 import psycopg2.extensions
@@ -41,29 +42,44 @@ def obtener_camara(conn: psycopg2.extensions.connection, cliente: str, planta: s
         )
         cur.execute(
             """
-            SELECT id, estado_actual, dias_no_concluyente_consecutivos
+            SELECT id, estado_actual, dias_no_concluyente_consecutivos, base_reemplazada_el,
+                   dias_borroso_consecutivos, p95_desplazamiento
             FROM perfil_camara
             WHERE cliente = %s AND planta = %s AND servidor = %s AND camara = %s
             """,
             (cliente, planta, servidor, camara),
         )
-        id_, estado_actual, dias = cur.fetchone()
-        return {"id": id_, "estado_actual": estado_actual, "dias_no_concluyente_consecutivos": dias}
+        id_, estado_actual, dias, base_reemplazada_el, dias_borroso, p95_desp = cur.fetchone()
+        return {
+            "id": id_, "estado_actual": estado_actual, "dias_no_concluyente_consecutivos": dias,
+            "base_reemplazada_el": base_reemplazada_el, "dias_borroso_consecutivos": dias_borroso,
+            "p95_desplazamiento": p95_desp,
+        }
 
 
 DIAS_AMARILLO_PARA_REVISION = 3  # ver _siguiente_estado
+DIAS_BORROSO_PARA_REVISION = 3  # ver _siguiente_estado -- mismo criterio, pero para nitidez
 
 
 def _siguiente_estado(
     estado_actual: str, imagen_status: str | None, veredicto_humano: str | None,
-    dias_no_concl_previo: int = 0,
+    dias_no_concl_previo: int = 0, fuerza_revision_borrosa: bool = False,
+    fuerza_revision_salud: bool = False,
 ) -> str:
     """Máquina de estados del semáforo (ROADMAP.md, sección 2.7).
 
     Un ámbar (`NO CONCLUYENTE`) que lleva `DIAS_AMARILLO_PARA_REVISION` días seguidos pasa a morado
     -- deja de ser "ninguno de los dos métodos está seguro" para convertirse en "alguien tiene que
     decidir", igual que un `REVISAR` normal (pedido 22/10/2026: antes se quedaba en ámbar para
-    siempre si nunca llegaba a confirmarse como movimiento real, sin que ningún humano lo viera)."""
+    siempre si nunca llegaba a confirmarse como movimiento real, sin que ningún humano lo viera).
+
+    `fuerza_revision_borrosa` (26/10/2026, detección de lente sucio/desenfocado): mismo patrón --
+    aunque la geometría diga `OK`, una nitidez sospechosa sostenida `DIAS_BORROSO_PARA_REVISION`
+    días seguidos también manda a morado, para que un humano lo vea.
+
+    `fuerza_revision_salud` (26/10/2026, salud absoluta de imagen): mismo efecto, pero como
+    disparador inmediato de un solo día -- una obstrucción total no necesita esperar varios días
+    para confirmarse, a diferencia de un desenfoque gradual."""
     if veredicto_humano == "bien":
         return "verde"
     if veredicto_humano == "mal":
@@ -77,7 +93,7 @@ def _siguiente_estado(
         return "verde" if imagen_status == "OK" else estado_actual
 
     if imagen_status in ("OK", "BASE CREADA"):
-        return "verde"
+        return "morado" if (fuerza_revision_borrosa or fuerza_revision_salud) else "verde"
     if imagen_status == "REVISAR":
         return "morado"
     if imagen_status == "NO CONCLUYENTE":
@@ -90,7 +106,7 @@ def guardar_resultado(
     estado_actual_previo: str, dias_no_concl_previo: int,
     config_result: dict | None, imagen_result: dict | None,
     veredicto_humano: str | None, modo: str,
-    log_info: dict | None = None,
+    log_info: dict | None = None, dias_borroso_previo: int = 0,
 ) -> str:
     """Escribe el resultado de una cámara (upsert por día) y actualiza su estado vivo.
 
@@ -103,7 +119,16 @@ def guardar_resultado(
     día, y si no, por qué) -- independiente de si Fase 1/2 encontraron algo que comparar.
     """
     imagen_status = imagen_result["status"] if imagen_result else None
-    nuevo_estado = _siguiente_estado(estado_actual_previo, imagen_status, veredicto_humano, dias_no_concl_previo)
+    nitidez_sospechosa = imagen_result.get("nitidez_sospechosa") if imagen_result else None
+    salud_sospechosa = imagen_result.get("salud_sospechosa") if imagen_result else None
+    fuerza_revision_borrosa = (
+        nitidez_sospechosa is True and dias_borroso_previo + 1 >= DIAS_BORROSO_PARA_REVISION
+    )
+    fuerza_revision_salud = salud_sospechosa is True
+    nuevo_estado = _siguiente_estado(
+        estado_actual_previo, imagen_status, veredicto_humano, dias_no_concl_previo,
+        fuerza_revision_borrosa, fuerza_revision_salud,
+    )
     if imagen_status == "NO CONCLUYENTE":
         nuevo_dias = dias_no_concl_previo + 1
     elif imagen_status is None:
@@ -115,6 +140,15 @@ def guardar_resultado(
     else:
         nuevo_dias = 0
 
+    if nitidez_sospechosa is None:
+        # Sin suficiente historial todavía para evaluar (o sin imagen ese día) -- no es ni "sí" ni
+        # "no", así que la racha se congela igual que `nuevo_dias` arriba.
+        nuevo_dias_borroso = dias_borroso_previo
+    elif nitidez_sospechosa:
+        nuevo_dias_borroso = dias_borroso_previo + 1
+    else:
+        nuevo_dias_borroso = 0
+
     with conn, conn.cursor() as cur:
         cur.execute(
             """
@@ -123,9 +157,18 @@ def guardar_resultado(
                 config_status, config_marca, config_diferencias,
                 imagen_status, imagen_motivo, orb_inliers, orb_desplazamiento,
                 fase_confianza, fase_desplazamiento,
+                nitidez_actual, nitidez_mediana_historica, nitidez_mad_historica,
+                nitidez_sospechosa,
+                salud_varianza, salud_brillo, salud_sospechosa,
+                orb_tx, orb_ty, orb_rotacion_deg, orb_escala,
+                diaanterior_status, diaanterior_motivo,
+                diaanterior_orb_desplazamiento, diaanterior_fase_desplazamiento,
                 veredicto_humano, modo,
                 log_ip, log_estado, log_motivo, tiempo_proceso_seg
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ) VALUES (
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+            )
             ON CONFLICT (camara_id, fecha) DO UPDATE SET
                 config_status = EXCLUDED.config_status,
                 config_marca = EXCLUDED.config_marca,
@@ -136,6 +179,21 @@ def guardar_resultado(
                 orb_desplazamiento = EXCLUDED.orb_desplazamiento,
                 fase_confianza = EXCLUDED.fase_confianza,
                 fase_desplazamiento = EXCLUDED.fase_desplazamiento,
+                nitidez_actual = EXCLUDED.nitidez_actual,
+                nitidez_mediana_historica = EXCLUDED.nitidez_mediana_historica,
+                nitidez_mad_historica = EXCLUDED.nitidez_mad_historica,
+                nitidez_sospechosa = EXCLUDED.nitidez_sospechosa,
+                salud_varianza = EXCLUDED.salud_varianza,
+                salud_brillo = EXCLUDED.salud_brillo,
+                salud_sospechosa = EXCLUDED.salud_sospechosa,
+                orb_tx = EXCLUDED.orb_tx,
+                orb_ty = EXCLUDED.orb_ty,
+                orb_rotacion_deg = EXCLUDED.orb_rotacion_deg,
+                orb_escala = EXCLUDED.orb_escala,
+                diaanterior_status = EXCLUDED.diaanterior_status,
+                diaanterior_motivo = EXCLUDED.diaanterior_motivo,
+                diaanterior_orb_desplazamiento = EXCLUDED.diaanterior_orb_desplazamiento,
+                diaanterior_fase_desplazamiento = EXCLUDED.diaanterior_fase_desplazamiento,
                 veredicto_humano = EXCLUDED.veredicto_humano,
                 modo = EXCLUDED.modo,
                 log_ip = EXCLUDED.log_ip,
@@ -155,6 +213,21 @@ def guardar_resultado(
                 imagen_result["orb_desp"] if imagen_result else None,
                 imagen_result["fase_conf"] if imagen_result else None,
                 imagen_result["fase_desp"] if imagen_result else None,
+                imagen_result["nitidez_hoy"] if imagen_result else None,
+                imagen_result["nitidez_mediana_hist"] if imagen_result else None,
+                imagen_result["nitidez_mad_hist"] if imagen_result else None,
+                nitidez_sospechosa,
+                imagen_result["salud_varianza"] if imagen_result else None,
+                imagen_result["salud_brillo"] if imagen_result else None,
+                salud_sospechosa,
+                imagen_result["orb_tx"] if imagen_result else None,
+                imagen_result["orb_ty"] if imagen_result else None,
+                imagen_result["orb_rotacion_deg"] if imagen_result else None,
+                imagen_result["orb_escala"] if imagen_result else None,
+                imagen_result["diaanterior_status"] if imagen_result else None,
+                imagen_result["diaanterior_motivo"] if imagen_result else None,
+                imagen_result["diaanterior_orb_desp"] if imagen_result else None,
+                imagen_result["diaanterior_fase_desp"] if imagen_result else None,
                 veredicto_humano,
                 modo,
                 log_info["ip"] if log_info else None,
@@ -169,11 +242,13 @@ def guardar_resultado(
             SET estado_actual = %s,
                 estado_desde = CASE WHEN estado_actual <> %s THEN %s ELSE estado_desde END,
                 dias_no_concluyente_consecutivos = %s,
+                dias_borroso_consecutivos = %s,
                 n_confirmaciones_humanas = n_confirmaciones_humanas + %s,
                 actualizado_en = now()
             WHERE id = %s
             """,
-            (nuevo_estado, nuevo_estado, fecha, nuevo_dias, 1 if veredicto_humano else 0, camara_id),
+            (nuevo_estado, nuevo_estado, fecha, nuevo_dias, nuevo_dias_borroso,
+             1 if veredicto_humano else 0, camara_id),
         )
     return nuevo_estado
 
@@ -208,13 +283,93 @@ def crear_observacion(conn: psycopg2.extensions.connection, camara_id: int, text
 
 def marcar_base_reemplazada(conn: psycopg2.extensions.connection, cliente: str, planta: str,
                              servidor: str, camara: str) -> None:
-    """Confirma el reemplazo de una base: la cámara vuelve a verde (ROADMAP.md, sección 2.8)."""
+    """Confirma el reemplazo de una base: la cámara vuelve a verde (ROADMAP.md, sección 2.8), y
+    queda marcada para promover su base a mediana en cuanto se junte suficiente historial fresco
+    (ver ROADMAP.md, 26/10/2026, paso 3 -- `base_reemplazada_el`)."""
     with conn, conn.cursor() as cur:
         cur.execute(
             """
             UPDATE perfil_camara
-            SET estado_actual = 'verde', estado_desde = CURRENT_DATE, actualizado_en = now()
+            SET estado_actual = 'verde', estado_desde = CURRENT_DATE,
+                base_reemplazada_el = CURRENT_DATE, actualizado_en = now()
             WHERE cliente = %s AND planta = %s AND servidor = %s AND camara = %s
             """,
             (cliente, planta, servidor, camara),
         )
+
+
+def limpiar_base_reemplazada(conn: psycopg2.extensions.connection, cliente: str, planta: str,
+                              servidor: str, camara: str) -> None:
+    """Ya se promovió la base a mediana (ver `comparacion.image_compare.promover_base_a_mediana`)
+    -- apaga la marca de "promoción pendiente"."""
+    with conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE perfil_camara
+            SET base_reemplazada_el = NULL, actualizado_en = now()
+            WHERE cliente = %s AND planta = %s AND servidor = %s AND camara = %s
+            """,
+            (cliente, planta, servidor, camara),
+        )
+
+
+MIN_MUESTRAS_CALIBRACION = 20  # ver recalcular_perfiles_estadisticos
+
+
+def recalcular_perfiles_estadisticos(conn: psycopg2.extensions.connection) -> int:
+    """Recalcula `mediana_desplazamiento`/`p95_desplazamiento` por cámara, a partir de su propio
+    historial de desplazamientos "normales" (ROADMAP.md, 26/10/2026 -- conectar `umbral_para()`).
+
+    Cuenta como "normal" un día donde `imagen_status = 'OK'` (el sistema ya dijo que no había
+    problema), o donde un humano confirmó explícitamente que no lo había (`veredicto_humano =
+    'bien'`, incluso si el sistema lo había marcado `REVISAR`) -- la evidencia real de qué tan
+    ruidosa es cada cámara está justo en esos "REVISAR" que resultaron ser falsos positivos
+    (confirmado con datos reales el 26/10/2026, ver `scripts/analizar_veredictos.py`). Se excluyen
+    explícitamente los días confirmados como movimiento real (`mal`) o base desactualizada
+    (`desactualizada`) -- esos no son "ruido normal", son justo lo que se quiere seguir detectando.
+
+    Exige al menos `MIN_MUESTRAS_CALIBRACION` lecturas (ORB + fase combinadas) antes de confiar en
+    el cálculo -- por debajo de eso, `perfil_camara.p95_desplazamiento` se deja sin tocar y
+    `umbral_para()` sigue usando el umbral global para esa cámara.
+
+    Pensado para correrse una vez al final de cada corrida de `main.py`, después de que todas las
+    cámaras del día ya se guardaron -- nunca a mitad de la corrida del mismo día, para no calibrar
+    con datos de hoy que todavía no se terminaron de verificar hoy mismo.
+
+    Regresa cuántas cámaras quedaron (re)calibradas.
+    """
+    with conn, conn.cursor() as cur:
+        cur.execute("SELECT id FROM perfil_camara")
+        camara_ids = [fila[0] for fila in cur.fetchall()]
+
+        recalibradas = 0
+        for camara_id in camara_ids:
+            cur.execute(
+                """
+                SELECT orb_desplazamiento, fase_desplazamiento
+                FROM historial_comparacion
+                WHERE camara_id = %s
+                  AND (imagen_status = 'OK' OR veredicto_humano = 'bien')
+                  AND (veredicto_humano IS NULL OR veredicto_humano NOT IN ('mal', 'desactualizada'))
+                """,
+                (camara_id,),
+            )
+            valores = sorted(v for fila in cur.fetchall() for v in fila if v is not None)
+            if len(valores) < MIN_MUESTRAS_CALIBRACION:
+                continue
+
+            mediana = statistics.median(valores)
+            indice_p95 = max(0, int(len(valores) * 0.95) - 1)
+            p95 = valores[indice_p95]
+
+            cur.execute(
+                """
+                UPDATE perfil_camara
+                SET mediana_desplazamiento = %s, p95_desplazamiento = %s,
+                    ultimo_recalculo = CURRENT_DATE, actualizado_en = now()
+                WHERE id = %s
+                """,
+                (mediana, p95, camara_id),
+            )
+            recalibradas += 1
+    return recalibradas

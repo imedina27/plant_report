@@ -5,6 +5,7 @@ venv/
 .env
 .vscode/
 CLAUDE.local.md
+caracteristicas-equipo.md
 /Test/
 /script/capture_img/images/
 /Reportes/
