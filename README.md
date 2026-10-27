@@ -57,8 +57,9 @@ copy .env.example .env
 | --- | --- |
 | `CHECK_PLANTS_ROOT` | Carpeta raíz donde el programa externo de revisión deja los `.log`, imágenes y `.json` de configuración, con la estructura `[Cliente]\[Mes]\[ddmmyy]\[Planta]\[Servidor]\`. |
 | `CONFIG_BASE_ROOT` | Configuración "base" de referencia de cada cámara (`[Cliente]\[Planta]\[Servidor]\[Cámara].json`). Se crea sola la primera vez que se procesa una cámara sin base. |
-| `IMAGE_BASE_ROOT` | Imagen "base" de referencia de cada cámara (`[Cliente]\[Planta]\[Servidor]\[Cámara].jpg`). También se crea sola la primera vez. |
-| `IMAGE_HISTORY_ROOT` | Copia fechada del `.jpg` de cada cámara, últimos 10 días (`[Cliente]\[Planta]\[Servidor]\[Cámara]\[AAAA-MM-DD].jpg`). Se llena sola; pensada para construir más adelante una base por mediana en vez de la foto de un solo día (ver ROADMAP.md). |
+| `IMAGE_BASE_ROOT` | Imagen "base" de referencia de cada cámara (`[Cliente]\[Planta]\[Servidor]\[Cámara].jpg`) -- siempre una foto real de un solo día, la que se le muestra a un humano (ventana de revisión, ventana de bases, PDF del reporte). También se crea sola la primera vez. |
+| `IMAGE_BASE_MEDIANA_ROOT` | Mediana por píxel de los últimos días de la cámara (mismo formato de ruta que `IMAGE_BASE_ROOT`), usada **solo** por el algoritmo de comparación -- nunca se le muestra a un humano, para no confundir con "fantasmas" de vehículos/personas que mezclar varios días puede dejar. Se llena sola cuando hay suficiente historial (ver ROADMAP.md, 26-27/10/2026). |
+| `IMAGE_HISTORY_ROOT` | Copia fechada del `.jpg` de cada cámara, últimos 10 días (`[Cliente]\[Planta]\[Servidor]\[Cámara]\[AAAA-MM-DD].jpg`). Se llena sola; es de donde sale la mediana de `IMAGE_BASE_MEDIANA_ROOT` (ver ROADMAP.md). |
 | `REPORTES_ROOT` | Carpeta donde se guardan los PDFs del reporte ejecutivo, uno por cliente: `REPORTES_ROOT\[Cliente]\[DDMMYYYY]_[Cliente].pdf`. |
 | `DB_HOST` / `DB_PORT` / `DB_NAME` / `DB_USER` / `DB_PASSWORD` | Conexión a PostgreSQL. |
 | `MONIT_API_URL` | URL base de la API de `Monit_Servers_V2` (proyecto hermano), para traer temperatura CPU/GPU y uso de disco de cada servidor. Si un servidor no existe ahí, o si la API no responde (caída, sin VPN, etc.), el reporte muestra "Sin datos" sin bloquear nada. |
@@ -126,6 +127,8 @@ pipenv run python main.py --no-interaction --date h
 | `scripts/backfill_reportes.py` | Vuelve a correr la comparación sobre un rango de fechas pasadas **sin tocar la base de datos** (ni enviar correos) — solo para revisar resultados sobre datos históricos. |
 | `scripts/diagnostico_jpeg.py` | Revisa si alguna imagen real falla al decodificarse (más allá de los avisos de "Corrupt JPEG" que a veces se ven en consola, que normalmente son inofensivos). |
 | `scripts/mock_reporte_ejecutivo.py` | Genera un PDF de muestra del reporte ejecutivo con datos inventados, para revisar el diseño sin tocar ninguna base de datos real. |
+| `scripts/separar_base_mediana.py` | Migración de una sola vez (27/10/2026): separa `IMAGE_BASE_ROOT` (foto real) de `IMAGE_BASE_MEDIANA_ROOT` (mediana) para cámaras que ya se habían promovido antes de que existiera esa separación. Usa un detector de objetos (YOLO, dependencia `ultralytics`) para elegir una foto del mes sin vehículos/personas. Admite `--dry-run`, `--client`, `--camera`. |
+| `scripts/revisar_bases.py` | Auditoría visual rápida: muestra, cámara por cámara, la base real de un servidor (`--client`/`--plant`/`--server`) y deja marcarla como `base_desactualizada` con un clic, o pasar a la siguiente sin hacer nada. Las ya marcadas se saltan solas. Sin banderas, lista las combinaciones cliente/planta/servidor disponibles. |
 
 ## Script de captura independiente
 

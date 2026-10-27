@@ -5,6 +5,37 @@ fecha en vez de versión (este proyecto no se publica como paquete). Es un regis
 qué cambió y cuándo -- el *por qué* de cada decisión está en [ROADMAP.md](ROADMAP.md), que sigue
 siendo la fuente de verdad del proyecto.
 
+## 2026-10-27
+
+### Agregado
+
+- Separación de la base "para mostrar" (`IMAGE_BASE_ROOT`, foto real de un solo día) y la base
+  "para calcular" (`IMAGE_BASE_MEDIANA_ROOT`, nueva variable de entorno, la mediana por píxel):
+  la mediana podía mostrar "fantasmas" de vehículos/personas presentes solo algunos de los 10 días
+  mezclados, confusos para un humano aunque válidos para medir desplazamiento. `base_path()` ya
+  nunca se sobrescribe con la mediana; `compare_camera_image()` mide contra la mediana si ya existe,
+  si no contra la foto de un solo día (igual que antes de que existiera la mediana). Nueva
+  `limpiar_base_mediana()`, llamada junto con `limpiar_historial_imagen()` al reemplazar una base a
+  mano (`main.py`, `ui/ventana_bases.py`), para no seguir midiendo contra una mediana vieja.
+- `scripts/separar_base_mediana.py`: migración de una sola vez para las cámaras ya promovidas antes
+  de este cambio (su `IMAGE_BASE_ROOT` ya tenía la mediana, sin la foto original). Mueve lo que
+  hubiera en `IMAGE_BASE_ROOT` hacia `IMAGE_BASE_MEDIANA_ROOT` tal cual (cero cambio para el
+  cálculo) y elige, de las fotos del mes en curso **sin contar hoy**, la más libre de vehículos y
+  personas según un detector de objetos preentrenado (YOLOv8m, vía nueva dependencia `ultralytics`)
+  para dejarla en `IMAGE_BASE_ROOT`. Corrido contra producción: 212 cámaras migradas (190 con una
+  foto totalmente limpia, 22 sin opción perfecta por tráfico casi constante), 5 sin fotos
+  utilizables este mes.
+
+- `scripts/revisar_bases.py`: auditoría visual rápida de bases ya existentes -- recorre cámara por
+  cámara las bases de un servidor elegido (`--client`/`--plant`/`--server`) y deja marcar
+  `base_desactualizada` con un clic (deja nota en la bitácora de la cámara), o seguir sin hacer
+  nada. Las cámaras ya marcadas se saltan solas. Nueva `db.marcar_base_desactualizada_manual()`.
+
+### Cambiado
+
+- `Pipfile`: se agregó `ultralytics` (y su dependencia `torch`, CPU) -- la usa únicamente
+  `scripts/separar_base_mediana.py`, no el resto del programa.
+
 ## 2026-10-26
 
 ### Agregado

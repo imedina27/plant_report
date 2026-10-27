@@ -300,6 +300,22 @@ def marcar_base_reemplazada(conn: psycopg2.extensions.connection, cliente: str, 
         )
 
 
+def marcar_base_desactualizada_manual(conn: psycopg2.extensions.connection, cliente: str,
+                                       planta: str, servidor: str, camara: str) -> None:
+    """Marca la base como desactualizada desde una auditoría visual (`scripts/revisar_bases.py`),
+    sin pasar por una comparación real -- no toca `historial_comparacion`, solo el semáforo."""
+    with conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE perfil_camara
+            SET estado_actual = 'base_desactualizada', estado_desde = CURRENT_DATE,
+                actualizado_en = now()
+            WHERE cliente = %s AND planta = %s AND servidor = %s AND camara = %s
+            """,
+            (cliente, planta, servidor, camara),
+        )
+
+
 def limpiar_base_reemplazada(conn: psycopg2.extensions.connection, cliente: str, planta: str,
                               servidor: str, camara: str) -> None:
     """Ya se promovió la base a mediana (ver `comparacion.image_compare.promover_base_a_mediana`)

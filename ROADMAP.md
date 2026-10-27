@@ -2379,9 +2379,80 @@ paso acordado: entender bien cómo está hecha la v1 actual antes de decidir qu�
     actualmente en `base_desactualizada` llevan 0 días (se marcaron hoy mismo), así que el próximo
     reporte no se ve afectado todavía.
 
-- **Siguiente paso (sesión del 27/10/2026)**: revisar a fondo el módulo del reporte ejecutivo en
-  PDF -- `reporte/datos_reporte.py` (arma los datos desde la base de datos) y
+- **Base "para mostrar" separada de la base "para calcular" (27/10/2026)**. El usuario, en la
+  revisión real del día (no en un script de prueba), notó el mismo "fantasma" que se había visto
+  y aceptado el 26/10 -- pero esta vez le pareció un problema real: un revisor humano no entiende
+  una foto con vehículos semitransparentes y piensa que está viendo algo editado.
+  - **Causa confirmada en código**: tanto `main.py` como `ui/ventana_revision.py` leen
+    `base_path()` para mostrar -- el mismo archivo que `promover_base_a_mediana()` sobrescribe con
+    la mediana. El archivo que se muestra es genuino (no se altera al vuelo), pero *es* la mediana,
+    no una foto real de un solo día.
+  - **Diseño propuesto por el usuario, confirmado**: dos carpetas. `IMAGE_BASE_ROOT` (ya existía)
+    vuelve a ser siempre una foto real de un solo día -- la que se muestra. `IMAGE_BASE_MEDIANA_ROOT`
+    (nueva) guarda la mediana -- la que mide el algoritmo. `promover_base_a_mediana()` ya no toca
+    `IMAGE_BASE_ROOT`; `compare_camera_image()` mide contra la mediana si existe, si no contra la
+    foto de un solo día (igual que antes de que existiera la mediana por completo). Nueva
+    `limpiar_base_mediana()`, llamada junto con `limpiar_historial_imagen()` al reemplazar una base
+    a mano, para no seguir midiendo contra una mediana vieja tras el reemplazo.
+  - **Migración de lo ya promovido**: las cámaras que `promover_bases_pendientes.py` ya había
+    promovido (ver 26/10/2026) tenían la mediana en `IMAGE_BASE_ROOT` sin que quedara la foto
+    original en ningún lado -- `scripts/separar_base_mediana.py` mueve ese archivo tal cual a
+    `IMAGE_BASE_MEDIANA_ROOT` (cero cambio para el cálculo, mismos bytes que ya se usaban) y elige
+    una foto real para dejar en `IMAGE_BASE_ROOT`.
+  - **Criterio para elegir esa foto, decidido con el usuario**: del mes en curso, **sin contar
+    hoy** (llovía en Zacatecas -- piso mojado, muchos reflejos -- mejor no depender del día más
+    reciente para esto en ninguna cámara). De las opciones disponibles, se descartó el heurístico
+    estadístico (imagen más cercana a la mediana del mes, sin dependencias nuevas) a favor de
+    detección de objetos real con YOLO -- el usuario prefirió precisión sobre simplicidad para
+    este caso, aprovechando que la máquina ya tiene el hardware para correrlo (ver discusión previa
+    sobre YOLO y el hardware de cómputo) y que es un script de un solo uso, no una dependencia del
+    flujo en tiempo real.
+  - **Primer intento (YOLOv8n) con un falso negativo real, detectado antes de confiar en el
+    resultado**: en cámaras de muelle con la cámara muy cerca del camión (la parrilla llena casi
+    todo el cuadro), YOLOv8n no detectó nada ni bajando la confianza a 0.05 -- eligió como "limpia"
+    una foto con un camión ocupando toda la imagen. Confirmado con YOLOv8m sobre la misma foto: sí
+    lo detecta (como clase "car", no "truck", pero esa clase ya estaba en la lista de "sucias").
+    Se cambió el modelo a YOLOv8m (más preciso, sigue siendo viable en CPU para un script de un
+    solo uso: ~6 minutos para las ~265 cámaras) y se volvió a correr -- el script se hizo
+    idempotente (si `IMAGE_BASE_MEDIANA_ROOT` ya tiene el archivo de una corrida anterior, no lo
+    vuelve a tocar, solo repite la elección de foto para mostrar), para poder reintentar sin
+    arriesgar la mediana ya separada correctamente.
+  - **Corrido contra producción, verificado visualmente contra las dos cámaras que reportó el
+    usuario** (`AbInBev/APAN/QLYMSPROD03/BX5` y `AbInBev/TOCANCIPA/QLYMSPROD05/B02`): 212 cámaras
+    migradas -- 190 con una foto totalmente limpia del mes, 22 sin opción perfecta por tráfico casi
+    constante (se usa la de menos detecciones), 5 sin fotos utilizables ese mes (sin tocar). Límite
+    conocido y aceptado: en `B02` la foto elegida como "limpia" tiene un vehículo parcialmente
+    cortado en el borde superior del cuadro, que el detector no marcó -- mucho menor que el
+    problema original, no se insistió más en resolverlo (rendimientos decrecientes).
+  - Nueva dependencia `ultralytics` (y `torch`, CPU) agregada al `Pipfile` a mano -- `pipenv
+    install`/`pipenv lock` siguen fallando con "Permission denied" en esta máquina (mismo problema
+    de siempre, ver `CLAUDE.local.md`), así que el `Pipfile.lock` no se pudo regenerar esta sesión.
+
+- **`scripts/revisar_bases.py`: auditoría visual rápida de bases (27/10/2026)**. Tras la migración
+  de arriba, el usuario notó que varias bases reales se ven mal (no es un problema de esta sesión,
+  son bases que ya estaban desactualizadas de antes y nadie lo había notado a simple vista). Pidió
+  una herramienta rápida para recorrer las bases de un servidor y marcarlas.
+  - **Diseño confirmado con el usuario** (3 preguntas, las 3 con la opción recomendada menos la
+    última): las cámaras ya en `base_desactualizada` se saltan solas (no tiene caso re-marcarlas);
+    "Bien" no persiste nada -- si se corre de nuevo sobre el mismo servidor, se ve todo desde el
+    principio otra vez (más simple que llevar un registro de avance); "Base Desactualizada" sí deja
+    una nota genérica en `observacion_camara`, para distinguir que vino de esta auditoría y no del
+    flujo diario normal.
+  - Ventana de un solo panel (sin el panel "Actual" ni el campo de observación de
+    `ui/ventana_revision.py` -- esos no aplican aquí), reutilizando tema/paleta/helpers de ese mismo
+    módulo en vez de duplicarlos.
+  - Nueva `db.marcar_base_desactualizada_manual()` -- mismo patrón que `marcar_base_reemplazada()`
+    pero al revés (`estado_actual = 'base_desactualizada'`), sin tocar `historial_comparacion`: esto
+    es una auditoría visual de la base en sí, no una comparación del día.
+  - Probado: construcción/cierre de la ventana con una base real (sin exceptions), y el camino de
+    escritura en base de datos completo (`obtener_camara` → `marcar_base_desactualizada_manual` →
+    `crear_observacion`) contra una fila de prueba desechable, verificado y borrado por completo
+    después -- no quedó nada de prueba en producción.
+
+- **Siguiente paso**: revisar a fondo el módulo del reporte ejecutivo en PDF --
+  `reporte/datos_reporte.py` (arma los datos desde la base de datos) y
   `reporte/reporte_ejecutivo.py` (construye el PDF en sí, sin tocar ninguna base de datos). Mismo
   tratamiento que los módulos anteriores: diagrama de flujo en `diagramas/` primero, y de ahí
   decidir si hace falta alguna modificación (ej. cómo se ve la nueva escalada de `base
-  desactualizada` a los 3 días, o cualquier otro ajuste que surja de revisarlo con calma).
+  desactualizada` a los 3 días, o cualquier otro ajuste que surja de revisarlo con calma). Sigue
+  pendiente -- la sesión del 27/10/2026 se fue en el arreglo de la base "fantasma" de arriba.
