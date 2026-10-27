@@ -21,7 +21,13 @@ from datetime import date
 from pathlib import Path
 from tkinter import filedialog
 
-from comparacion.image_compare import IMAGE_BASE_ROOT, guardar_historial_imagen, limpiar_historial_imagen, save_base
+from comparacion.image_compare import (
+    IMAGE_BASE_ROOT,
+    guardar_historial_imagen,
+    limpiar_base_mediana,
+    limpiar_historial_imagen,
+    save_base,
+)
 from persistencia import db
 from ui.ventana_revision import (
     ACENTO,
@@ -228,6 +234,10 @@ class VentanaBases:
             return
         cliente, planta, servidor, camara = datos
         save_base(cliente, planta, servidor, camara, self._ruta_candidata)
+
+        # Borra la mediana vieja -- si no, la comparación seguiría midiendo contra fotos de antes
+        # del reemplazo hasta que se complete una mediana nueva (ver ROADMAP.md, 27/10/2026).
+        limpiar_base_mediana(cliente, planta, servidor, camara)
 
         # Arranca el historial fresco desde cero -- ver ROADMAP.md, 26/10/2026, paso 3: una vez
         # que se junten N_DIAS_MEDIANA_BASE días desde hoy, main.py promueve esta base provisional

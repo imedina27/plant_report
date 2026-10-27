@@ -41,6 +41,7 @@ load_dotenv()
 CHECK_PLANTS_ROOT = Path(os.environ["CHECK_PLANTS_ROOT"])
 IMAGE_BASE_ROOT = Path(os.environ["IMAGE_BASE_ROOT"])
 IMAGE_HISTORY_ROOT = Path(os.environ["IMAGE_HISTORY_ROOT"])
+IMAGE_BASE_MEDIANA_ROOT = Path(os.environ["IMAGE_BASE_MEDIANA_ROOT"])
 
 # --- Umbrales validados en los Experimentos 3, 5, 6, 7b y 9 (ver ROADMAP.md) ---
 MIN_INLIERS = 100
@@ -333,7 +334,18 @@ def evaluar_par(base: np.ndarray, actual: np.ndarray, calibrado_px: float | None
 # ---------------------------------------------------------------------------
 
 def base_path(cliente: str, planta: str, servidor: str, camara: str) -> Path:
+    """Foto real de un solo día -- la que se le muestra a un humano (ventana de revisión,
+    ventana de bases, PDF del reporte). Nunca es la mediana (ver `base_mediana_path`)."""
     return IMAGE_BASE_ROOT / cliente / planta / servidor / f"{camara}.jpg"
+
+
+def base_mediana_path(cliente: str, planta: str, servidor: str, camara: str) -> Path:
+    """Mediana por píxel de `N_DIAS_MEDIANA_BASE` días (ver `construir_base_por_mediana`) --
+    solo la usa el algoritmo de comparación, nunca se le muestra a un humano: mezclar varios
+    días por píxel puede dejar "fantasmas" donde un vehículo/persona estuvo presente en algunos
+    días y no en otros, y eso confunde al revisor aunque sea estadísticamente válido para medir
+    desplazamiento (ver ROADMAP.md, 27/10/2026)."""
+    return IMAGE_BASE_MEDIANA_ROOT / cliente / planta / servidor / f"{camara}.jpg"
 
 
 def load_base(cliente: str, planta: str, servidor: str, camara: str) -> np.ndarray | None:
@@ -343,10 +355,28 @@ def load_base(cliente: str, planta: str, servidor: str, camara: str) -> np.ndarr
     return imread_unicode(path)
 
 
+def load_base_calculo(cliente: str, planta: str, servidor: str, camara: str) -> np.ndarray | None:
+    """La imagen contra la que mide realmente `evaluar_par()`: la mediana si ya se promovió una,
+    si no la foto de un solo día (igual que antes de que existiera la mediana)."""
+    path_mediana = base_mediana_path(cliente, planta, servidor, camara)
+    if path_mediana.exists():
+        return imread_unicode(path_mediana)
+    return load_base(cliente, planta, servidor, camara)
+
+
 def save_base(cliente: str, planta: str, servidor: str, camara: str, jpg_path: Path) -> None:
     path = base_path(cliente, planta, servidor, camara)
     path.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(jpg_path, path)
+
+
+def limpiar_base_mediana(cliente: str, planta: str, servidor: str, camara: str) -> None:
+    """Borra la mediana vieja al reemplazar la base a mano (`ui/ventana_bases.py`, `main.py`),
+    para que la comparación vuelva de inmediato a la foto fresca en vez de seguir midiendo
+    contra una mediana armada con fotos de antes del reemplazo."""
+    path_mediana = base_mediana_path(cliente, planta, servidor, camara)
+    if path_mediana.exists():
+        path_mediana.unlink()
 
 
 # ---------------------------------------------------------------------------
@@ -433,7 +463,9 @@ def construir_base_por_mediana(cliente: str, planta: str, servidor: str, camara:
 
 
 def promover_base_a_mediana(cliente: str, planta: str, servidor: str, camara: str) -> bool:
-    """Si ya hay suficiente historial, reemplaza la base actual de la cámara por la mediana.
+    """Si ya hay suficiente historial, arma la mediana y la guarda en `base_mediana_path()` --
+    **no** toca `base_path()` (ROADMAP.md, 27/10/2026): esa sigue siendo la foto de un solo día
+    que se le muestra a un humano.
 
     Regresa `True` si promovió (el llamador, `main.py`, debe entonces apagar la marca de
     "promoción pendiente" en la base de datos -- este módulo no sabe nada de eso). Regresa `False`
@@ -442,7 +474,9 @@ def promover_base_a_mediana(cliente: str, planta: str, servidor: str, camara: st
     mediana = construir_base_por_mediana(cliente, planta, servidor, camara)
     if mediana is None:
         return False
-    imwrite_unicode(base_path(cliente, planta, servidor, camara), mediana)
+    path_mediana = base_mediana_path(cliente, planta, servidor, camara)
+    path_mediana.parent.mkdir(parents=True, exist_ok=True)
+    imwrite_unicode(path_mediana, mediana)
     return True
 
 
@@ -547,7 +581,10 @@ def compare_camera_image(
         return {"status": "NO CONCLUYENTE", "motivo": "no se pudo leer la imagen",
                 **sin_geometria, **sin_nitidez, **sin_salud, **_SIN_DIA_ANTERIOR}
 
-    resultado = evaluar_par(base, actual, umbral_calibrado_px)
+    # `base` solo sirvió para decidir si ya existe base -- la comparación en sí mide contra la
+    # mediana cuando ya hay una (más robusta a vehículos de paso), o contra `base` si aún no.
+    base_calculo = load_base_calculo(cliente, planta, servidor, camara)
+    resultado = evaluar_par(base_calculo, actual, umbral_calibrado_px)
     resultado.update(evaluar_nitidez(cliente, planta, servidor, camara, actual))
     resultado.update(salud)
     resultado.update(dia_anterior)

@@ -8,6 +8,7 @@ from comparacion.image_compare import (
     base_path,
     compare_camera_image,
     guardar_historial_imagen,
+    limpiar_base_mediana,
     limpiar_historial_imagen,
     promover_base_a_mediana,
     save_base,
@@ -210,6 +211,7 @@ def main() -> None:
                         # inmediato como base provisional, igual que en ui/ventana_bases.py
                         # (ROADMAP.md, 26/10/2026): en 10 días frescos se promueve sola a mediana.
                         save_base(cliente, planta, servidor, camara, jpg_path)
+                        limpiar_base_mediana(cliente, planta, servidor, camara)
                         limpiar_historial_imagen(cliente, planta, servidor, camara)
                         guardar_historial_imagen(cliente, planta, servidor, camara, jpg_path, fecha)
                         db.marcar_base_reemplazada(conn, cliente, planta, servidor, camara)
