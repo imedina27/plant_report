@@ -48,7 +48,7 @@ def main() -> None:
     fecha = FECHA_INICIO
     while fecha <= FECHA_FIN:
         date_str = f"{fecha:%d%m%y}"
-        camaras, logs_por_servidor = _camaras_del_dia(date_str)
+        camaras, logs_por_servidor, _servicios_ia_por_servidor = _camaras_del_dia(date_str)
         if not camaras:
             fecha += timedelta(days=1)
             continue

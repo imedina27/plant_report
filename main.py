@@ -13,7 +13,7 @@ from comparacion.image_compare import (
     promover_base_a_mediana,
     save_base,
 )
-from comparacion.log_parse import parsear_log_servidor
+from comparacion.log_parse import parsear_log_servidor, parsear_servicios_ia_servidor
 from integraciones.correo import enviar_reportes
 from persistencia import db
 from reporte.datos_reporte import generar_reportes_del_dia
@@ -22,7 +22,11 @@ from ui.ventana_revision import VentanaRevision
 
 def _camaras_del_dia(
     date_str: str, cliente: str | None = None,
-) -> tuple[list[tuple[str, str, str, str, Path | None, Path | None]], dict[tuple[str, str, str], dict]]:
+) -> tuple[
+    list[tuple[str, str, str, str, Path | None, Path | None]],
+    dict[tuple[str, str, str], dict],
+    dict[tuple[str, str, str], list[dict]],
+]:
     """Encuentra cada cámara con `.json`, `.jpg` y/o entrada en el `.log` del servidor para esa fecha.
 
     Una cámara puede tener solo uno de los dos archivos (p. ej. si una fase de la descarga falló ese
@@ -34,8 +38,10 @@ def _camaras_del_dia(
     cual aparece en `CHECK_PLANTS_ROOT`) -- evita recorrer el resto del árbol cuando solo interesa
     uno (ver `--client` en `main.py`).
 
-    Regresa `(camaras, logs_por_servidor)`, donde `logs_por_servidor[(cliente, planta, servidor)]`
-    es el resultado de `parsear_log_servidor()` para ese servidor (ya parseado una sola vez).
+    Regresa `(camaras, logs_por_servidor, servicios_ia_por_servidor)`: `logs_por_servidor[(cliente,
+    planta, servidor)]` es el resultado de `parsear_log_servidor()` para ese servidor, y
+    `servicios_ia_por_servidor[(cliente, planta, servidor)]` el de `parsear_servicios_ia_servidor()`
+    (ROADMAP.md, 27/10/2026) -- ambos ya parseados una sola vez, del mismo `.log`.
     """
     patron_cliente = cliente if cliente is not None else "*"
 
@@ -49,6 +55,7 @@ def _camaras_del_dia(
             encontradas.setdefault((cliente_encontrado, planta, servidor, camara), {})[ext] = path
 
     logs_por_servidor: dict[tuple[str, str, str], dict] = {}
+    servicios_ia_por_servidor: dict[tuple[str, str, str], list[dict]] = {}
     for log_path in CHECK_PLANTS_ROOT.glob(f"{patron_cliente}/*/{date_str}/**/*.log"):
         partes = log_path.relative_to(CHECK_PLANTS_ROOT).parts
         if len(partes) != 6:
@@ -56,6 +63,9 @@ def _camaras_del_dia(
         cliente_encontrado, _mes, _fecha, planta, servidor = partes[:5]
         log_servidor = parsear_log_servidor(log_path)
         logs_por_servidor[(cliente_encontrado, planta, servidor)] = log_servidor
+        servicios_ia_por_servidor[(cliente_encontrado, planta, servidor)] = (
+            parsear_servicios_ia_servidor(log_path)
+        )
         for camara in log_servidor:
             encontradas.setdefault((cliente_encontrado, planta, servidor, camara), {})
 
@@ -63,7 +73,7 @@ def _camaras_del_dia(
         (cliente, planta, servidor, camara, archivos.get("json"), archivos.get("jpg"))
         for (cliente, planta, servidor, camara), archivos in sorted(encontradas.items())
     ]
-    return camaras, logs_por_servidor
+    return camaras, logs_por_servidor, servicios_ia_por_servidor
 
 
 def _formatear_diagnostico(r: dict) -> str:
@@ -134,7 +144,7 @@ def main() -> None:
     date_str = date.today().strftime("%d%m%y") if raw.lower() == "h" else raw
     fecha = datetime.strptime(date_str, "%d%m%y").date()
 
-    camaras, logs_por_servidor = _camaras_del_dia(date_str, args.client)
+    camaras, logs_por_servidor, servicios_ia_por_servidor = _camaras_del_dia(date_str, args.client)
     if not camaras:
         donde = CHECK_PLANTS_ROOT / args.client if args.client else CHECK_PLANTS_ROOT
         print(f"No se encontraron archivos .json/.jpg para la fecha {date_str} en {donde}")
@@ -146,6 +156,18 @@ def main() -> None:
     ventana = None if args.no_interaction else VentanaRevision()
     modo = "sin_interaccion" if args.no_interaction else "interactivo"
     conn = db.get_connection()
+
+    for (cliente, planta, servidor), servicios in servicios_ia_por_servidor.items():
+        for servicio in servicios:
+            estado_previo = db.guardar_estado_servicio_ia(
+                conn, cliente, planta, servidor, servicio["puerto"], fecha,
+                servicio["estado"], servicio["motivo"],
+            )
+            if estado_previo != servicio["estado"]:
+                print(
+                    f"  - {cliente}/{planta}/{servidor} puerto {servicio['puerto']}: "
+                    f"servicio IA {estado_previo} -> {servicio['estado']}"
+                )
 
     for i, (cliente, planta, servidor, camara, json_path, jpg_path) in enumerate(camaras, start=1):
         etiqueta = f"{cliente}/{planta}/{servidor}/{camara}"

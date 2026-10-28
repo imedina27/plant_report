@@ -18,6 +18,12 @@ _RE_CAMPO = re.compile(
     r"^\[(?P<hora>\d{2}:\d{2}:\d{2})\]\s+(?P<nivel>INFO|ERROR)\s+(?P<camara>\S+):\s*(?P<resto>.+?)\s*$"
 )
 _RE_TIEMPO = re.compile(r"Tiempo de proceso\s+([\d.]+)s", re.IGNORECASE)
+_RE_PUERTO_IA = re.compile(
+    r"^\[(?P<hora>\d{2}:\d{2}:\d{2})\]\s+INFO\s+Puerto IA configurado\s+(?P<puerto>\d+)\s*$"
+)
+_RE_YAML = re.compile(
+    r"^\[(?P<hora>\d{2}:\d{2}:\d{2})\]\s+(?P<nivel>INFO|ERROR)\s+YAML\s+(?P<resto>.+?)\s*$"
+)
 
 
 def _nueva_entrada() -> dict:
@@ -69,3 +75,43 @@ def parsear_log_servidor(log_path: Path) -> dict[str, dict]:
             info["motivo"] = resto
 
     return camaras
+
+
+def parsear_servicios_ia_servidor(log_path: Path) -> list[dict]:
+    """Regresa `[{"puerto", "estado" ("ok"|"caido"), "motivo"}, ...]`, uno por cada puerto de
+    servicio de IA configurado en ese servidor (ROADMAP.md, 27/10/2026) -- un mismo servidor puede
+    tener más de uno (ej. Api_Manzanillo, con hasta 4).
+
+    Depende de que el programa externo imprima `Puerto IA configurado <N>` justo antes de intentar
+    leer el YAML de ese puerto: antes de ese cambio, una lectura fallida no dejaba ningún rastro del
+    puerto en el log, y no había forma de saber a cuál de varios puertos atribuir la falla.
+    """
+    if not log_path.exists():
+        return []
+
+    data = log_path.read_bytes()
+    try:
+        texto = data.decode("utf-8")
+    except UnicodeDecodeError:
+        texto = data.decode("cp1252")
+
+    servicios: list[dict] = []
+    puerto_pendiente: int | None = None
+    for linea in texto.splitlines():
+        linea = linea.strip()
+
+        m_puerto = _RE_PUERTO_IA.match(linea)
+        if m_puerto:
+            puerto_pendiente = int(m_puerto["puerto"])
+            continue
+
+        m_yaml = _RE_YAML.match(linea)
+        if m_yaml and puerto_pendiente is not None:
+            servicios.append({
+                "puerto": puerto_pendiente,
+                "estado": "ok" if m_yaml["nivel"] == "INFO" else "caido",
+                "motivo": f"YAML {m_yaml['resto']}",
+            })
+            puerto_pendiente = None
+
+    return servicios

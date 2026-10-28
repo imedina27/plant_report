@@ -331,6 +331,54 @@ def limpiar_base_reemplazada(conn: psycopg2.extensions.connection, cliente: str,
         )
 
 
+def guardar_estado_servicio_ia(
+    conn: psycopg2.extensions.connection, cliente: str, planta: str, servidor: str,
+    puerto: int, fecha: datetime.date, estado: str, motivo: str | None,
+) -> str:
+    """Upsert del catálogo/estado vivo de un servicio de IA (`servicio_ia`) + su registro del día
+    (`historial_servicio_ia`), ROADMAP.md 27/10/2026. Regresa el estado anterior, para que
+    `main.py` pueda avisar en consola cuando cambia (igual que `guardar_resultado`)."""
+    with conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO servicio_ia (cliente, planta, servidor, puerto, estado_actual, estado_desde)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            ON CONFLICT (cliente, planta, servidor, puerto) DO NOTHING
+            """,
+            (cliente, planta, servidor, puerto, estado, fecha),
+        )
+        cur.execute(
+            """
+            SELECT id, estado_actual FROM servicio_ia
+            WHERE cliente = %s AND planta = %s AND servidor = %s AND puerto = %s
+            """,
+            (cliente, planta, servidor, puerto),
+        )
+        servicio_id, estado_previo = cur.fetchone()
+
+        cur.execute(
+            """
+            UPDATE servicio_ia
+            SET estado_actual = %s,
+                estado_desde = CASE WHEN estado_actual <> %s THEN %s ELSE estado_desde END,
+                actualizado_en = now()
+            WHERE id = %s
+            """,
+            (estado, estado, fecha, servicio_id),
+        )
+        cur.execute(
+            """
+            INSERT INTO historial_servicio_ia (servicio_id, fecha, estado, motivo)
+            VALUES (%s, %s, %s, %s)
+            ON CONFLICT (servicio_id, fecha) DO UPDATE SET
+                estado = EXCLUDED.estado,
+                motivo = EXCLUDED.motivo
+            """,
+            (servicio_id, fecha, estado, motivo),
+        )
+    return estado_previo
+
+
 MIN_MUESTRAS_CALIBRACION = 20  # ver recalcular_perfiles_estadisticos
 
 
