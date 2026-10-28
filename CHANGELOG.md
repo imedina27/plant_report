@@ -18,6 +18,30 @@ siendo la fuente de verdad del proyecto.
   y su observación, perdidas en 146 filas "fantasma" creadas por el bug de arriba el 27/10 -- esas
   146 filas (sin historial real) se borraron después.
 
+### Agregado
+
+- Nuevo veredicto "Obstruida" en la ventana de revisión (`ui/ventana_revision.py`) -- para cuando
+  algo temporal (camión, objeto de paso) tapó la escena: la cámara sigue bien (semáforo verde), pero
+  esa foto no cuenta para la mediana. Botón nuevo en la misma fila que los otros 4, con una línea
+  divisoria entre grupos: `Bien` `Obstruida` | `Mal` `Base Desactualizada` | `Actualizar Base`.
+- Revisión humana de cambios de configuración, reutilizando la misma ventana
+  (`pedir_revision_config()`, se muestra después de la de imagen si una cámara tiene ambas
+  pendientes el mismo día): 2 paneles de texto con solo los campos que cambiaron (no el archivo
+  completo), y solo `Aceptar Cambio` (reemplaza la base con la de hoy) y `Mal` (abre una incidencia
+  de configuración, separada de la de imagen -- no se vuelve a preguntar hasta que se resuelva).
+  Nuevas columnas `perfil_camara.config_estado_actual`/`config_incidencia_desde` y
+  `historial_comparacion.config_veredicto_humano` (`migrations/0010_config_incidencia.sql`).
+
+### Cambiado
+
+- `compare_camera_image()` ya no guarda la foto de hoy al historial de imágenes por su cuenta --
+  ahora `main.py` lo hace explícitamente, después de conocer el veredicto humano (si lo hay), y lo
+  omite para cualquier veredicto distinto de "Bien" (`Mal`, `Base Desactualizada`, `Obstruida`) --
+  "Actualizar Base" sigue reiniciando su propio historial como antes. Efecto colateral bueno:
+  `scripts/backfill_reportes.py` deja de modificar archivos reales de `IMAGE_HISTORY_ROOT` al
+  correrlo (nunca debió hacerlo, según su propio docstring), y la detección de nitidez ya no se
+  compara sin querer contra una línea base que incluía la foto del propio día.
+
 ## 2026-10-27
 
 ### Agregado

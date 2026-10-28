@@ -43,17 +43,21 @@ def obtener_camara(conn: psycopg2.extensions.connection, cliente: str, planta: s
         cur.execute(
             """
             SELECT id, estado_actual, dias_no_concluyente_consecutivos, base_reemplazada_el,
-                   dias_borroso_consecutivos, p95_desplazamiento
+                   dias_borroso_consecutivos, p95_desplazamiento,
+                   config_estado_actual, config_incidencia_desde
             FROM perfil_camara
             WHERE cliente = %s AND planta = %s AND servidor = %s AND camara = %s
             """,
             (cliente, planta, servidor, camara),
         )
-        id_, estado_actual, dias, base_reemplazada_el, dias_borroso, p95_desp = cur.fetchone()
+        (id_, estado_actual, dias, base_reemplazada_el, dias_borroso, p95_desp,
+         config_estado_actual, config_incidencia_desde) = cur.fetchone()
         return {
             "id": id_, "estado_actual": estado_actual, "dias_no_concluyente_consecutivos": dias,
             "base_reemplazada_el": base_reemplazada_el, "dias_borroso_consecutivos": dias_borroso,
             "p95_desplazamiento": p95_desp,
+            "config_estado_actual": config_estado_actual,
+            "config_incidencia_desde": config_incidencia_desde,
         }
 
 
@@ -80,9 +84,12 @@ def _siguiente_estado(
     `fuerza_revision_salud` (26/10/2026, salud absoluta de imagen): mismo efecto, pero como
     disparador inmediato de un solo día -- una obstrucción total no necesita esperar varios días
     para confirmarse, a diferencia de un desenfoque gradual."""
-    if veredicto_humano in ("bien", "actualizar_base"):
+    if veredicto_humano in ("bien", "actualizar_base", "obstruida"):
         # "actualizar_base" (26/10/2026): la base estaba vieja, pero la foto de hoy ya sirve y se
         # usó de inmediato como base nueva (ver main.py) -- el problema ya quedó resuelto.
+        # "obstruida" (28/10/2026): no es que la cámara se haya movido -- algo temporal tapó la
+        # escena (camión, objeto de paso). La cámara sigue bien, solo la foto de hoy no cuenta
+        # para el historial que alimenta la mediana (ver main.py).
         return "verde"
     if veredicto_humano == "mal":
         return "rojo"
@@ -103,13 +110,36 @@ def _siguiente_estado(
     return estado_actual
 
 
+def _siguiente_estado_config(
+    estado_actual: str, config_status: str | None, veredicto_humano: str | None,
+) -> str:
+    """Semáforo de configuración (ROADMAP.md, 28/10/2026) -- más simple que `_siguiente_estado()`:
+    solo "ok"/"incidencia", porque a diferencia de ORB/fase (señales ruidosas), un cambio de
+    configuración es una comparación exacta campo por campo -- no hay ambigüedad que amerite
+    estados intermedios como ámbar/morado.
+
+    "incidencia" se queda así (sin volver a preguntar, ver main.py) hasta que alguien presione
+    "Aceptar Cambio" (confirma que el cambio es legítimo, reemplaza la base), o la configuración
+    real de la cámara vuelva a coincidir con la base por su cuenta (alguien la corrigió a mano,
+    sin pasar por esta ventana)."""
+    if veredicto_humano == "aceptar_cambio":
+        return "ok"
+    if veredicto_humano == "mal":
+        return "incidencia"
+    if estado_actual == "incidencia":
+        return "ok" if config_status == "OK" else "incidencia"
+    return estado_actual
+
+
 def guardar_resultado(
     conn: psycopg2.extensions.connection, camara_id: int, fecha: datetime.date,
     estado_actual_previo: str, dias_no_concl_previo: int,
     config_result: dict | None, imagen_result: dict | None,
     veredicto_humano: str | None, modo: str,
     log_info: dict | None = None, dias_borroso_previo: int = 0,
-) -> str:
+    config_estado_previo: str = "ok", config_incidencia_desde_previo: datetime.date | None = None,
+    config_veredicto_humano: str | None = None,
+) -> tuple[str, str]:
     """Escribe el resultado de una cámara (upsert por día) y actualiza su estado vivo.
 
     Se llama una vez por cámara, justo después de resolverla -- no en lote al final de la corrida
@@ -119,6 +149,9 @@ def guardar_resultado(
     `log_info` viene de `log_parse.parsear_log_servidor()`: el diagnóstico de conexión/captura del
     `.log` del servidor para esta cámara (si el programa externo de revisión logró procesarla ese
     día, y si no, por qué) -- independiente de si Fase 1/2 encontraron algo que comparar.
+
+    Regresa `(nuevo_estado, nuevo_config_estado)` -- el semáforo de imagen y el de configuración
+    (ROADMAP.md, 28/10/2026), cada uno independiente del otro.
     """
     imagen_status = imagen_result["status"] if imagen_result else None
     nitidez_sospechosa = imagen_result.get("nitidez_sospechosa") if imagen_result else None
@@ -151,12 +184,23 @@ def guardar_resultado(
     else:
         nuevo_dias_borroso = 0
 
+    config_status = config_result["status"] if config_result else None
+    nuevo_config_estado = _siguiente_estado_config(
+        config_estado_previo, config_status, config_veredicto_humano,
+    )
+    if nuevo_config_estado == "incidencia" and config_estado_previo != "incidencia":
+        nueva_config_incidencia_desde = fecha
+    elif nuevo_config_estado == "ok":
+        nueva_config_incidencia_desde = None
+    else:
+        nueva_config_incidencia_desde = config_incidencia_desde_previo
+
     with conn, conn.cursor() as cur:
         cur.execute(
             """
             INSERT INTO historial_comparacion (
                 camara_id, fecha,
-                config_status, config_marca, config_diferencias,
+                config_status, config_marca, config_diferencias, config_veredicto_humano,
                 imagen_status, imagen_motivo, orb_inliers, orb_desplazamiento,
                 fase_confianza, fase_desplazamiento,
                 nitidez_actual, nitidez_mediana_historica, nitidez_mad_historica,
@@ -169,12 +213,13 @@ def guardar_resultado(
                 log_ip, log_estado, log_motivo, tiempo_proceso_seg
             ) VALUES (
                 %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
             )
             ON CONFLICT (camara_id, fecha) DO UPDATE SET
                 config_status = EXCLUDED.config_status,
                 config_marca = EXCLUDED.config_marca,
                 config_diferencias = EXCLUDED.config_diferencias,
+                config_veredicto_humano = EXCLUDED.config_veredicto_humano,
                 imagen_status = EXCLUDED.imagen_status,
                 imagen_motivo = EXCLUDED.imagen_motivo,
                 orb_inliers = EXCLUDED.orb_inliers,
@@ -206,9 +251,10 @@ def guardar_resultado(
             """,
             (
                 camara_id, fecha,
-                config_result["status"] if config_result else None,
+                config_status,
                 config_result["marca"] if config_result else None,
                 Json(config_result["diferencias"]) if config_result else None,
+                config_veredicto_humano,
                 imagen_status,
                 imagen_result["motivo"] if imagen_result else None,
                 imagen_result["orb_inliers"] if imagen_result else None,
@@ -246,13 +292,16 @@ def guardar_resultado(
                 dias_no_concluyente_consecutivos = %s,
                 dias_borroso_consecutivos = %s,
                 n_confirmaciones_humanas = n_confirmaciones_humanas + %s,
+                config_estado_actual = %s,
+                config_incidencia_desde = %s,
                 actualizado_en = now()
             WHERE id = %s
             """,
             (nuevo_estado, nuevo_estado, fecha, nuevo_dias, nuevo_dias_borroso,
-             1 if veredicto_humano else 0, camara_id),
+             1 if veredicto_humano else 0, nuevo_config_estado, nueva_config_incidencia_desde,
+             camara_id),
         )
-    return nuevo_estado
+    return nuevo_estado, nuevo_config_estado
 
 
 def camaras_con_base_desactualizada(conn: psycopg2.extensions.connection) -> list[dict]:

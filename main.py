@@ -4,6 +4,7 @@ from datetime import date, datetime
 from pathlib import Path
 
 from comparacion.config_compare import CHECK_PLANTS_ROOT, compare_camera_config
+from comparacion.config_compare import save_base as save_config_base
 from comparacion.image_compare import (
     base_path,
     compare_camera_image,
@@ -193,7 +194,7 @@ def main() -> None:
         if jpg_path is not None:
             ya_desactualizada = perfil["estado_actual"] == "base_desactualizada"
             imagen_result = compare_camera_image(
-                jpg_path, cliente, planta, servidor, camara, ya_desactualizada, fecha,
+                jpg_path, cliente, planta, servidor, camara, ya_desactualizada,
                 perfil["p95_desplazamiento"],
             )
             detalle = f" ({imagen_result['motivo']})" if imagen_result["motivo"] else ""
@@ -246,15 +247,48 @@ def main() -> None:
                         else:
                             motivo_mal = "cámara movida"
                         partes.append(f"CONFIRMADO: {motivo_mal}")
+                    elif veredicto_humano == "obstruida":
+                        # No es que la cámara se haya movido -- algo temporal tapó la escena (ver
+                        # ROADMAP.md, 28/10/2026). La foto de hoy no entra al historial de abajo.
+                        partes.append("obstruida -- no cuenta para la mediana")
                     else:
                         partes.append("marcado como falso positivo")
                     if observacion:
                         db.crear_observacion(conn, perfil["id"], observacion)
                         partes.append("observación guardada")
+
+            # Se guarda DESPUÉS de saber el veredicto (si lo hubo) -- una foto obstruida, de una
+            # incidencia real, o de una base desactualizada no debería contar para la próxima
+            # mediana (ROADMAP.md, 28/10/2026). "actualizar_base" ya gestionó su propio historial
+            # arriba (reinicia la ventana desde cero), así que no se repite aquí.
+            if imagen_result.get("imagen_legible") and veredicto_humano not in (
+                "mal", "desactualizada", "obstruida", "actualizar_base",
+            ):
+                guardar_historial_imagen(cliente, planta, servidor, camara, jpg_path, fecha)
         elif log_info and log_info["motivo"]:
             partes.append(f"imagen: SIN ARCHIVO ({log_info['motivo']})")
         else:
             partes.append("imagen: SIN ARCHIVO")
+
+        # Configuración se revisa DESPUÉS de imagen a propósito (ROADMAP.md, 28/10/2026) -- así,
+        # si una cámara tiene las dos pendientes el mismo día, el usuario ya vio cómo se ve la
+        # cámara antes de decidir si acepta un cambio de configuración.
+        config_veredicto_humano = None
+        if config_result is not None and config_result["status"] == "CAMBIO":
+            if perfil["config_estado_actual"] == "incidencia":
+                partes.append("incidencia de configuración ya confirmada, sigue abierta")
+            elif ventana is not None:
+                config_veredicto_humano, observacion_config = ventana.pedir_revision_config(
+                    etiqueta, config_result["marca"], config_result["diferencias"],
+                )
+                if config_veredicto_humano == "aceptar_cambio":
+                    save_config_base(cliente, planta, servidor, camara, config_result["config_actual"])
+                    partes.append("configuración aceptada, nueva base")
+                else:
+                    partes.append("CONFIRMADO: cambio de configuración no autorizado")
+                if observacion_config:
+                    db.crear_observacion(conn, perfil["id"], observacion_config)
+                    partes.append("observación de configuración guardada")
 
         if perfil["base_reemplazada_el"] is not None:
             # Base provisional en espera de suficiente historial fresco -- ver ROADMAP.md,
@@ -263,14 +297,18 @@ def main() -> None:
                 db.limpiar_base_reemplazada(conn, cliente, planta, servidor, camara)
                 partes.append("base provisional promovida a mediana")
 
-        nuevo_estado = db.guardar_resultado(
+        nuevo_estado, nuevo_config_estado = db.guardar_resultado(
             conn, perfil["id"], fecha, perfil["estado_actual"],
             perfil["dias_no_concluyente_consecutivos"],
             config_result, imagen_result, veredicto_humano, modo, log_info,
             perfil["dias_borroso_consecutivos"],
+            perfil["config_estado_actual"], perfil["config_incidencia_desde"],
+            config_veredicto_humano,
         )
         if nuevo_estado != perfil["estado_actual"]:
             partes.append(f"estado: {perfil['estado_actual']} -> {nuevo_estado}")
+        if nuevo_config_estado != perfil["config_estado_actual"]:
+            partes.append(f"config: {perfil['config_estado_actual']} -> {nuevo_config_estado}")
 
         print("  - " + "  |  ".join(partes))
 

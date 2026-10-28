@@ -87,10 +87,18 @@ servidor):
 2. Compara su `.jpg` contra `IMAGE_BASE_ROOT` (dos señales: features/homografía + correlación de
    fase).
 3. Si la imagen da `REVISAR` -- o si da `NO CONCLUYENTE` tres días seguidos -- abre una ventana para
-   que un humano confirme si la cámara se movió de verdad, si es un falso positivo, o si hay que
-   marcar la base como desactualizada (ver `ui/ventana_bases.py` abajo) — a menos que ya esté
-   confirmada como movida de un día anterior, en cuyo caso no se vuelve a preguntar.
-4. Guarda el resultado en PostgreSQL (cámara por cámara, justo después de resolverla).
+   que un humano confirme si la cámara se movió de verdad (`Mal`), si es un falso positivo (`Bien`),
+   si la escena estaba temporalmente tapada (`Obstruida` -- ej. un camión de paso: la cámara sigue
+   bien, pero esa foto no cuenta para la próxima mediana de referencia) o si hay que marcar la base
+   como desactualizada (ver `ui/ventana_bases.py` abajo) — a menos que ya esté confirmada como
+   movida de un día anterior, en cuyo caso no se vuelve a preguntar.
+4. Si la configuración da `CAMBIO`, abre una ventana aparte (solo los campos que cambiaron, no el
+   `.json` completo) para que un humano confirme si fue un cambio autorizado (`Aceptar Cambio` --
+   reemplaza la base con la de hoy) o si hay que investigarlo (`Mal` -- abre una incidencia de
+   configuración, independiente de la de imagen, que tampoco se vuelve a preguntar hasta que se
+   resuelva). Si una cámara tiene imagen y configuración pendientes el mismo día, primero se
+   revisa la imagen.
+5. Guarda el resultado en PostgreSQL (cámara por cámara, justo después de resolverla).
 
 Al terminar, pregunta si generar el reporte ejecutivo y si enviarlo por correo.
 

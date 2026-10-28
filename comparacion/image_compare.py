@@ -523,7 +523,7 @@ def evaluar_dia_anterior(
 
 def compare_camera_image(
     jpg_path: Path, cliente: str, planta: str, servidor: str, camara: str,
-    base_desactualizada: bool = False, fecha: date | None = None,
+    base_desactualizada: bool = False,
     umbral_calibrado_px: float | None = None,
 ) -> dict:
     """Compara la imagen actual de una cámara contra su base, creándola si falta.
@@ -532,9 +532,10 @@ def compare_camera_image(
     ROADMAP.md, secciones 2.8 y 3) -- este módulo ya no sabe nada de archivos marcadores, el
     llamador decide si la base está marcada antes de pedir la comparación.
 
-    `fecha` se usa para nombrar la copia que se guarda en el historial de imágenes (ver
-    `guardar_historial_imagen`) -- si no se da (p. ej. scripts viejos), simplemente no se guarda
-    historial para esa llamada.
+    No guarda nada en el historial de imágenes -- eso lo decide el llamador (`main.py`), después de
+    saber el veredicto humano si lo hay (ROADMAP.md, 28/10/2026: una foto obstruida, de una
+    incidencia real, o de una base desactualizada no debería contar para la próxima mediana). El
+    resultado trae `imagen_legible` para que el llamador sepa si había algo que guardar.
 
     `umbral_calibrado_px` -- ver `umbral_para()`: el p95 de desplazamiento "normal" de esta cámara
     en particular (`perfil_camara.p95_desplazamiento`), si ya hay suficiente historial calibrado.
@@ -551,40 +552,41 @@ def compare_camera_image(
     sin_salud = {"salud_varianza": None, "salud_brillo": None, "salud_sospechosa": None}
 
     actual = imread_unicode(jpg_path)
+    imagen_legible = actual is not None
 
-    # Debe calcularse ANTES de guardar el historial de hoy -- si no, "la más reciente del
-    # historial" sería la foto de hoy mismo, no la de ayer (ver `evaluar_dia_anterior`).
+    # Debe calcularse ANTES de que el llamador guarde el historial de hoy -- si no, "la más
+    # reciente del historial" sería la foto de hoy mismo, no la de ayer (`evaluar_dia_anterior`).
     dia_anterior = (
         evaluar_dia_anterior(cliente, planta, servidor, camara, actual, umbral_calibrado_px)
-        if actual is not None else _SIN_DIA_ANTERIOR
+        if imagen_legible else _SIN_DIA_ANTERIOR
     )
-
-    if actual is not None and fecha is not None:
-        guardar_historial_imagen(cliente, planta, servidor, camara, jpg_path, fecha)
 
     # Salud absoluta: no depende de base ni historial, así que se calcula siempre que la imagen se
     # pudo leer, incluso en BASE CREADA/BASE DESACTUALIZADA -- ver `evaluar_salud_imagen`.
-    salud = evaluar_salud_imagen(actual) if actual is not None else sin_salud
+    salud = evaluar_salud_imagen(actual) if imagen_legible else sin_salud
 
     base = load_base(cliente, planta, servidor, camara)
     if base is None:
         save_base(cliente, planta, servidor, camara, jpg_path)
-        return {"status": "BASE CREADA", "motivo": None,
+        return {"status": "BASE CREADA", "motivo": None, "imagen_legible": imagen_legible,
                 **sin_geometria, **sin_nitidez, **salud, **dia_anterior}
 
     if base_desactualizada:
         return {"status": "BASE DESACTUALIZADA",
                 "motivo": "pendiente de que alguien suba una imagen limpia (ventana_bases.py)",
+                "imagen_legible": imagen_legible,
                 **sin_geometria, **sin_nitidez, **salud, **dia_anterior}
 
-    if actual is None:
+    if not imagen_legible:
         return {"status": "NO CONCLUYENTE", "motivo": "no se pudo leer la imagen",
+                "imagen_legible": False,
                 **sin_geometria, **sin_nitidez, **sin_salud, **_SIN_DIA_ANTERIOR}
 
     # `base` solo sirvió para decidir si ya existe base -- la comparación en sí mide contra la
     # mediana cuando ya hay una (más robusta a vehículos de paso), o contra `base` si aún no.
     base_calculo = load_base_calculo(cliente, planta, servidor, camara)
     resultado = evaluar_par(base_calculo, actual, umbral_calibrado_px)
+    resultado["imagen_legible"] = True
     resultado.update(evaluar_nitidez(cliente, planta, servidor, camara, actual))
     resultado.update(salud)
     resultado.update(dia_anterior)

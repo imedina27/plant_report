@@ -2521,11 +2521,104 @@ paso acordado: entender bien cómo está hecha la v1 actual antes de decidir qu�
     28/10 -- posible que la foto elegida el 27/10 para esas dos no haya sido representativa. No se
     investigó más a fondo, queda como observación para el usuario.
 
+- **Nuevo veredicto "Obstruida" + la foto de hoy ya no entra sola al historial (28/10/2026)**. El
+  usuario notó, revisando la corrida del día, que una cámara marcada `REVISAR` por un camión u
+  objeto de paso frente al lente no es lo mismo que una cámara movida -- pero antes solo había
+  "Bien" (que sí mete esa foto obstruida a la mediana) o "Mal" (que no es cierto, la cámara no se
+  movió). Faltaba un "está bien, pero no cuentes esta foto".
+  - **Hallazgo antes de programar**: `compare_camera_image()` guardaba la foto de hoy al historial
+    de forma incondicional, *antes* de que existiera cualquier veredicto humano -- ni "Bien" ni
+    "Mal" podían evitarlo. Se decidió invertir el orden: primero el veredicto, después (si aplica)
+    se guarda.
+  - **Diseño confirmado con el usuario** (mock de texto del layout antes de tocar código): botón
+    nuevo "Obstruida" (morado `#7E57C2`, el mismo tono que ya usa `reporte_ejecutivo.py` para el
+    estado "morado" del semáforo, aunque el significado aquí es otro), en una sola fila con los 4
+    botones existentes, agrupados con una línea divisoria: `Bien` `Obstruida` | `Mal`
+    `Base Desactualizada` | `Actualizar Base`. Veredicto "Obstruida" -> semáforo verde (igual que
+    "Bien"), pero la foto de hoy **no** entra al historial de la mediana.
+  - Se generalizó la regla más allá de lo pedido, a petición del usuario: **ningún veredicto humano
+    distinto de "Bien" cuenta para el historial** (`Mal`, `Base Desactualizada` y `Obstruida` se
+    excluyen por igual) -- `Actualizar Base` es aparte, porque ya reinicia el historial desde cero
+    con la foto de hoy como primera del nuevo ciclo (sin cambios ahí). Se descartó una exclusión
+    especial para "Mal": el historial que se acumule entre la confirmación y el reemplazo de base se
+    borra de todas formas (`limpiar_historial_imagen()`) antes de construir cualquier mediana nueva,
+    así que no hay nada que proteger ahí.
+  - `comparacion/image_compare.py`: `compare_camera_image()` ya no guarda nada -- regresa
+    `imagen_legible` para que el llamador sepa si había algo que guardar. `fecha` salió de su firma
+    (ya no se usaba para nada más adentro).
+  - `main.py`: guarda el historial explícitamente después de conocer el veredicto (o de inmediato si
+    no hubo revisión humana ese día).
+  - `persistencia/db.py`: `_siguiente_estado()` suma `"obstruida"` al mismo grupo que `"bien"`/
+    `"actualizar_base"` (semáforo -> verde).
+  - **Efecto colateral bueno, no buscado**: `scripts/backfill_reportes.py` usaba la misma función
+    compartida y, sin que su propio docstring lo dijera, sí modificaba archivos reales de
+    `IMAGE_HISTORY_ROOT` cada vez que se corría -- con este cambio deja de hacerlo, sin tocarle nada
+    directamente, lo cual ya encajaba mejor con lo que el script dice que hace. También se encontró
+    (de pasada) que la nitidez (`evaluar_nitidez`) comparaba la foto de hoy contra una línea base que
+    ya la incluía a ella misma -- deja de pasar con este mismo cambio.
+  - Probado contra datos reales: `compare_camera_image()` contra una cámara real confirmando que ya
+    no toca el historial (conteo de archivos antes/después idéntico) y que regresa `imagen_legible`;
+    `_siguiente_estado()` con los 4 veredictos; prueba de humo de la ventana con el layout nuevo
+    (botón "Obstruida" encontrado y presionado programáticamente, acción y observación correctas).
+
+- **Revisión humana de cambios de configuración, reutilizando la misma ventana (28/10/2026)**. Hoy
+  `compare_camera_config()` detecta un `CAMBIO` y lo guarda en `historial_comparacion`, pero no pasa
+  nada más con eso -- no mueve el semáforo, no abre ninguna ventana, no sale en el PDF (confirmado:
+  cero menciones a `config_status`/`CAMBIO` en todo `reporte/`). El usuario pidió cerrar ese hueco.
+  - **Diseño confirmado con el usuario**, con varias vueltas de ida y vuelta:
+    - Semáforo de configuración **aparte** del de imagen -- `perfil_camara.config_estado_actual`
+      ('ok'/'incidencia') + `config_incidencia_desde`, y `historial_comparacion.
+      config_veredicto_humano` como columna propia (no se puede reusar `veredicto_humano`: una
+      misma cámara puede tener imagen *y* configuración pendientes el mismo día).
+      `_siguiente_estado_config()` es deliberadamente más simple que el de imagen -- solo 2 estados,
+      sin ámbar/morado, porque un cambio de configuración es una comparación exacta campo por
+      campo, no una señal ruidosa (ORB/fase) que amerite estados intermedios.
+    - Una vez marcado "Mal", **no se vuelve a preguntar** hasta que algo cambie (igual que
+      "incidencia ya confirmada" de imagen) -- se resuelve sola si la configuración real de la
+      cámara vuelve a coincidir con la base (alguien la corrigió a mano), o si alguien presiona
+      "Aceptar Cambio" después.
+    - **Las 4 categorías** (imagen/video/compresión/network) disparan la revisión -- se descartó
+      excluir "network" (ej. cambios de MAC): el usuario aclaró que todas las cámaras tienen IP
+      fija, así que un cambio ahí *sí* es una señal real (ej. `NF3` cambió de MAC porque la cámara
+      físicamente dañada se reemplazó por otra, no por DHCP).
+    - **Orden cuando una cámara tiene imagen y configuración pendientes el mismo día**: primero
+      imagen, luego configuración -- así el usuario ya vio cómo se ve la cámara antes de decidir si
+      acepta un cambio de configuración (pedido explícito del usuario).
+    - Botón "Bien" se renombra a **"Aceptar Cambio"** en este contexto (mismo verde) -- significa
+      "un usuario autorizado cambió esta configuración a propósito, sustituye la base por la de
+      hoy", un significado casi opuesto al "Bien" de imagen ("no pasó nada, falso positivo") -- se
+      decidió usar una palabra distinta para no confundir, aunque el botón quede en la misma
+      posición/color. "Obstruida", "Base Desactualizada" y "Actualizar Base" no aplican a
+      configuración -- quedan deshabilitados (grises) en esta pantalla.
+  - `comparacion/config_compare.py`: `compare_camera_config()` ahora también regresa
+    `config_actual` (el `.json` de hoy ya parseado) -- lo necesita "Aceptar Cambio" para poder
+    reemplazar la base sin releer el archivo.
+  - `ui/ventana_revision.py`: la fila de 5 botones se extrajo a un helper compartido
+    (`_construir_fila_botones()`, con el primer botón y los deshabilitados parametrizables) para no
+    duplicar el bloque entre `pedir_revision()` (imagen) y la nueva `pedir_revision_config()`
+    (2 paneles de texto -- "Configuración Base"/"Configuración Hoy" -- agrupados por categoría, solo
+    los campos que cambiaron, ya vienen así en `config_diferencias`).
+  - `persistencia/db.py`: nueva `_siguiente_estado_config()`; `guardar_resultado()` ahora también
+    recibe/calcula el estado de configuración y regresa `(nuevo_estado, nuevo_config_estado)` en vez
+    de un solo valor (único llamador: `main.py`).
+  - `main.py`: la revisión de configuración corre después de la de imagen, usando el mismo patrón
+    de "saltar si ya es una incidencia confirmada" que imagen.
+  - Probado contra datos reales: `_siguiente_estado_config()` con los 6 casos de transición;
+    `guardar_resultado()` con una fila desechable simulando 2 días seguidos (día 1 "mal" -> queda en
+    `incidencia` con `config_incidencia_desde` fijo; día 2 sin veredicto -> se mantiene abierta,
+    ambos días quedan en el historial); prueba de humo de `pedir_revision_config()` con los diffs
+    reales de `NF3` (bitrate + MAC) -- confirmado que los 3 botones que no aplican quedan realmente
+    `state="disabled"` (no solo visualmente), y que "Aceptar Cambio" regresa la acción/observación
+    correctas.
+  - **Pendiente, explícitamente para después**: mostrar las incidencias de configuración en el PDF
+    -- se hace junto con la Fase 2 de salud del servicio de IA y la revisión del módulo de reporte.
+
 - **Siguiente paso**: revisar a fondo el módulo del reporte ejecutivo en PDF --
   `reporte/datos_reporte.py` (arma los datos desde la base de datos) y
   `reporte/reporte_ejecutivo.py` (construye el PDF en sí, sin tocar ninguna base de datos). Mismo
   tratamiento que los módulos anteriores: diagrama de flujo en `diagramas/` primero, y de ahí decidir
-  cómo encaja la Fase 2 de salud del servicio de IA (arriba), además de cualquier otro ajuste que
-  surja de revisarlo con calma (ej. cómo se ve la escalada de `base_desactualizada` a los 3 días).
+  cómo encaja la Fase 2 de salud del servicio de IA y las incidencias de configuración (arriba),
+  usando una tabla simple de reglas (pedido del usuario), además de cualquier otro ajuste que surja
+  de revisarlo con calma (ej. cómo se ve la escalada de `base_desactualizada` a los 3 días).
   Sigue pendiente -- las sesiones del 27/10/2026 se fueron en el arreglo de la base "fantasma" y en
   la Fase 1 de salud del servicio de IA, ambas de arriba.

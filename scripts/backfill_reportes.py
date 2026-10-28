@@ -73,8 +73,11 @@ def main() -> None:
             imagen_result = None
             if jpg_path is not None:
                 ya_desactualizada = perfil["estado_actual"] == "base_desactualizada"
+                # No se llama a guardar_historial_imagen() -- desde que main.py dejó de guardarlo
+                # dentro de compare_camera_image() (ROADMAP.md, 28/10/2026), este script ya no toca
+                # IMAGE_HISTORY_ROOT en disco, que es justo lo que su docstring siempre dijo que hacía.
                 imagen_result = compare_camera_image(
-                    jpg_path, cliente, planta, servidor, camara, ya_desactualizada, fecha,
+                    jpg_path, cliente, planta, servidor, camara, ya_desactualizada,
                 )
 
             imagen_status = imagen_result["status"] if imagen_result else None

@@ -517,17 +517,22 @@ def compare_camera_config(json_path: Path, cliente: str, planta: str, servidor: 
     """Compara el .json actual de una cámara contra su base, creándola si falta.
 
     status: "MARCA NO SOPORTADA" | "BASE CREADA" | "OK" | "CAMBIO"
+
+    `config_actual` trae el .json de hoy ya parseado -- lo necesita el llamador (`main.py`) para
+    poder reemplazar la base con él si el veredicto humano es "Aceptar Cambio" (ROADMAP.md,
+    28/10/2026), sin tener que releerlo del disco otra vez.
     """
     current = json.loads(json_path.read_text(encoding="utf-8"))
 
     brand = detect_brand(current)
     if brand is None:
-        return {"status": "MARCA NO SOPORTADA", "marca": None, "diferencias": []}
+        return {"status": "MARCA NO SOPORTADA", "marca": None, "diferencias": [], "config_actual": current}
 
     base = load_base(cliente, planta, servidor, camara)
     if base is None:
         save_base(cliente, planta, servidor, camara, current)
-        return {"status": "BASE CREADA", "marca": brand, "diferencias": []}
+        return {"status": "BASE CREADA", "marca": brand, "diferencias": [], "config_actual": current}
 
     diffs = compare(current, base, brand)
-    return {"status": "CAMBIO" if diffs else "OK", "marca": brand, "diferencias": diffs}
+    return {"status": "CAMBIO" if diffs else "OK", "marca": brand, "diferencias": diffs,
+            "config_actual": current}

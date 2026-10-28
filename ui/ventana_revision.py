@@ -3,7 +3,7 @@
 Una sola ventana persistente, abierta desde que arranca la corrida hasta que
 termina. Normalmente muestra progreso ("procesando cámara X de Y"); cuando una
 cámara da REVISAR, el mismo panel cambia a mostrar la comparación (base vs.
-actual + diagnóstico + 4 botones) y bloquea ahí hasta que se resuelve, luego
+actual + diagnóstico + 5 botones) y bloquea ahí hasta que se resuelve, luego
 vuelve a mostrar progreso y sigue sola.
 
 Construida con Tkinter (incluido en Python) + Pillow (única dependencia nueva,
@@ -59,6 +59,7 @@ OK = "#2FA36B"
 WARN = "#E0902E"
 FAIL = "#D9534F"
 AZUL = "#3B7DDD"
+MORADO = "#7E57C2"  # mismo morado que reporte_ejecutivo.py, para no inventar un tono nuevo
 
 MAX_ANCHO_PANEL = 560
 MAX_ANCHO_LOGO = 150
@@ -307,24 +308,127 @@ class VentanaRevision:
 
         frame_botones = tk.Frame(self.contenido, bg=t["background"])
         frame_botones.pack(pady=16)
-
-        self._accion.set("")
-        tk.Button(frame_botones, text="Bien", bg=OK, fg="white", activebackground=OK,
-                  font=(FUENTE, 11, "bold"), width=14, relief="flat", bd=0,
-                  command=lambda: self._accion.set("bien")).grid(row=0, column=0, padx=8)
-        tk.Button(frame_botones, text="Mal", bg=FAIL, fg="white", activebackground=FAIL,
-                  font=(FUENTE, 11, "bold"), width=14, relief="flat", bd=0,
-                  command=lambda: self._accion.set("mal")).grid(row=0, column=1, padx=8)
-        tk.Button(frame_botones, text="Base Desactualizada", bg=AZUL, fg="white", activebackground=AZUL,
-                  font=(FUENTE, 11, "bold"), width=18, relief="flat", bd=0,
-                  command=lambda: self._accion.set("desactualizada")).grid(row=0, column=2, padx=8)
-        tk.Button(frame_botones, text="Actualizar Base", bg=WARN, fg="white", activebackground=WARN,
-                  font=(FUENTE, 11, "bold"), width=16, relief="flat", bd=0,
-                  command=lambda: self._accion.set("actualizar_base")).grid(row=0, column=3, padx=8)
+        self._construir_fila_botones(frame_botones)
 
         self.root.wait_variable(self._accion)
         observacion = self._texto_observacion.get("1.0", "end-1c").strip()
         return self._accion.get(), observacion
+
+    def pedir_revision_config(self, titulo: str, marca: str | None,
+                               diferencias: list[dict]) -> tuple[str, str]:
+        """Análogo a `pedir_revision()`, pero para un cambio de configuración detectado
+        (ROADMAP.md, 28/10/2026) -- en vez de imagen base/actual, muestra las líneas de
+        configuración que cambiaron (no el archivo completo), agrupadas por categoría.
+
+        Solo "Aceptar Cambio" y "Mal" están habilitados: no hay equivalente de "Obstruida"
+        (nada tapa un `.json`), "Base Desactualizada" (no hace falta subir nada a mano) ni
+        "Actualizar Base" (eso ya lo hace "Aceptar Cambio" aquí).
+        """
+        t = self.theme
+        self._limpiar_contenido()
+        self._imgs_referencia.clear()
+
+        tk.Label(self.contenido, text=titulo, font=(FUENTE, 17, "bold"),
+                 bg=t["background"], fg=t["text"]).pack(pady=(4, 2))
+        tk.Label(self.contenido, text=f"Cambio de configuración detectado ({marca or '?'})",
+                 font=(FUENTE, 10), fg=t["tenue"], bg=t["background"]).pack(pady=(0, 10))
+
+        por_categoria: dict[str, list[dict]] = {}
+        for d in diferencias:
+            por_categoria.setdefault(d["categoria"], []).append(d)
+
+        def _texto(clave_valor: str) -> str:
+            lineas = []
+            for categoria, items in sorted(por_categoria.items()):
+                lineas.append(f"[{categoria}]")
+                lineas.extend(f"  {item['campo']}: {item[clave_valor]}" for item in items)
+            return "\n".join(lineas) if lineas else "(sin cambios)"
+
+        frame_textos = tk.Frame(self.contenido, bg=t["background"])
+        frame_textos.pack()
+
+        for columna, (titulo_panel, clave_valor) in enumerate(
+            (("Configuración Base", "base"), ("Configuración Hoy", "actual")),
+        ):
+            col = tk.Frame(frame_textos, bg=t["frame_background"],
+                            highlightbackground=t["border"], highlightthickness=1)
+            col.grid(row=0, column=columna, padx=6, sticky="n")
+            tk.Label(col, text=titulo_panel, font=(FUENTE, 11, "bold"),
+                     bg=t["frame_background"], fg=t["text"]).pack(pady=(4, 2))
+            texto_widget = tk.Text(
+                col, width=50, height=16, font=(FUENTE, 9), wrap="word",
+                bg=t["frame_background"], fg=t["text"], relief="flat",
+                highlightthickness=0, padx=8, pady=6,
+            )
+            texto_widget.insert("1.0", _texto(clave_valor))
+            texto_widget.config(state="disabled")
+            texto_widget.pack(padx=4, pady=(0, 4))
+
+        tk.Label(self.contenido, text="Observación (opcional)", font=(FUENTE, 10, "bold"),
+                 bg=t["background"], fg=t["tenue"]).pack(pady=(12, 2))
+        self._texto_observacion = tk.Text(
+            self.contenido, height=2, width=70, font=(FUENTE, 10), wrap="word",
+            bg=t["frame_background"], fg=t["text"], insertbackground=t["text"],
+            relief="flat", highlightbackground=t["border"], highlightthickness=1,
+        )
+        self._texto_observacion.pack()
+
+        frame_botones = tk.Frame(self.contenido, bg=t["background"])
+        frame_botones.pack(pady=16)
+        self._construir_fila_botones(
+            frame_botones, primer_boton=("aceptar_cambio", "Aceptar Cambio"),
+            deshabilitados=frozenset({"obstruida", "desactualizada", "actualizar_base"}),
+        )
+
+        self.root.wait_variable(self._accion)
+        observacion = self._texto_observacion.get("1.0", "end-1c").strip()
+        return self._accion.get(), observacion
+
+    _ANCHO_BOTON = {
+        "bien": 14, "aceptar_cambio": 16, "obstruida": 14, "mal": 14,
+        "desactualizada": 18, "actualizar_base": 16,
+    }
+
+    def _construir_fila_botones(
+        self, frame_botones: tk.Frame, primer_boton: tuple[str, str] = ("bien", "Bien"),
+        deshabilitados: frozenset[str] = frozenset(),
+    ) -> None:
+        """Arma los 5 botones de veredicto en una sola fila, con una línea divisoria entre los 3
+        grupos (veredicto normal / algo anda mal / acción aparte) -- compartido entre
+        `pedir_revision()` (imagen) y `pedir_revision_config()` (ROADMAP.md, 28/10/2026), que solo
+        cambian la etiqueta/acción del primer botón y cuáles quedan deshabilitados.
+        """
+        t = self.theme
+
+        def _divisor() -> None:
+            tk.Frame(frame_botones, bg=t["border"], width=1).pack(side="left", fill="y", padx=12)
+
+        especificaciones = [
+            (*primer_boton, OK),
+            ("obstruida", "Obstruida", MORADO),
+            None,
+            ("mal", "Mal", FAIL),
+            ("desactualizada", "Base Desactualizada", AZUL),
+            None,
+            ("actualizar_base", "Actualizar Base", WARN),
+        ]
+
+        self._accion.set("")
+        for spec in especificaciones:
+            if spec is None:
+                _divisor()
+                continue
+            clave, texto, color = spec
+            if clave in deshabilitados:
+                bg_usar, fg_usar, estado = t["frame_background"], t["tenue"], "disabled"
+            else:
+                bg_usar, fg_usar, estado = color, "white", "normal"
+            tk.Button(
+                frame_botones, text=texto, bg=bg_usar, fg=fg_usar, activebackground=bg_usar,
+                font=(FUENTE, 11, "bold"), width=self._ANCHO_BOTON.get(clave, 14),
+                relief="flat", bd=0, state=estado,
+                command=lambda c=clave: self._accion.set(c),
+            ).pack(side="left", padx=4)
 
     def _mostrar_frame_procesando(self) -> None:
         self.mostrar_procesando("esperando…", 0, 1)
