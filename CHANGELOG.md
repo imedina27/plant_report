@@ -5,6 +5,19 @@ fecha en vez de versión (este proyecto no se publica como paquete). Es un regis
 qué cambió y cuándo -- el *por qué* de cada decisión está en [ROADMAP.md](ROADMAP.md), que sigue
 siendo la fuente de verdad del proyecto.
 
+## 2026-10-28
+
+### Corregido
+
+- `scripts/revisar_bases.py`: un `--client`/`--plant`/`--server` con mayúsculas distintas a las
+  reales (ej. `AbINBEV` en vez de `AbInBev`) creaba una cámara duplicada en la base de datos en vez
+  de tocar la real -- Windows no distingue mayúsculas en archivos, pero Postgres sí. Ahora se
+  normaliza contra la capitalización real antes de cualquier llamada a la base de datos.
+- Corrección de datos de una sola vez: 26 cámaras reales de `AbInBev` (13 en `ZACATECAS/QLYMSPROD01`,
+  12 en `ZACATECAS/QLYMSPROD02`, 1 en `TOCANCIPA/QLYMSPROD05`) recuperaron su `base_reemplazada_el`
+  y su observación, perdidas en 146 filas "fantasma" creadas por el bug de arriba el 27/10 -- esas
+  146 filas (sin historial real) se borraron después.
+
 ## 2026-10-27
 
 ### Agregado
@@ -31,10 +44,20 @@ siendo la fuente de verdad del proyecto.
   `base_desactualizada` con un clic (deja nota en la bitácora de la cámara), o seguir sin hacer
   nada. Las cámaras ya marcadas se saltan solas. Nueva `db.marcar_base_desactualizada_manual()`.
 
+- Salud del servicio de IA, Fase 1 (captura): nuevas tablas `servicio_ia` e
+  `historial_servicio_ia` (`migrations/0009_servicio_ia.sql`), nueva
+  `comparacion.log_parse.parsear_servicios_ia_servidor()` y `db.guardar_estado_servicio_ia()`.
+  `main.py` ahora detecta y persiste, por servidor, si el servicio de IA de cada uno de sus puertos
+  configurados está caído (lectura de YAML fallida) -- un mismo servidor puede tener varios puertos
+  de IA a la vez. Pendiente la Fase 2 (mostrarlo en el PDF del reporte ejecutivo).
+
 ### Cambiado
 
 - `Pipfile`: se agregó `ultralytics` (y su dependencia `torch`, CPU) -- la usa únicamente
   `scripts/separar_base_mediana.py`, no el resto del programa.
+- El programa externo de revisión de cámaras ahora imprime `Puerto IA configurado <N>` antes de
+  cada intento de lectura de YAML, sin importar si falla o no -- antes, una falla no dejaba
+  registro del puerto, imposible de atribuir en un servidor con más de uno.
 
 ## 2026-10-26
 

@@ -75,8 +75,12 @@ copy .env.example .env
 pipenv run python main.py
 ```
 
-Pide la fecha a procesar (`ddmmyy`, o `h` para hoy) y, para cada cámara encontrada ese día (o que
-falló por completo según el `.log` del servidor):
+Pide la fecha a procesar (`ddmmyy`, o `h` para hoy). Antes de procesar cámaras, por cada servidor
+revisa si su(s) servicio(s) de IA (uno o más puertos, según el `.log`) pudieron leer su YAML de
+configuración ese día -- si no, es un problema de infraestructura (Quantum Labs), no de la
+cámara/red del cliente, y queda guardado por separado (avisa en consola solo si cambió de estado).
+Después, para cada cámara encontrada ese día (o que falló por completo según el `.log` del
+servidor):
 
 1. Compara su `.json` contra `CONFIG_BASE_ROOT` (detecta la marca automáticamente — AXIS, HIKVISION,
    VIVOTEK, DAHUA).

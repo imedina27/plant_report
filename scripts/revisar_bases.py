@@ -110,11 +110,34 @@ def main() -> None:
     parser.add_argument("--server", help="Servidor exacto.")
     args = parser.parse_args()
 
+    combinaciones = _combinaciones_disponibles()
     if not (args.client and args.plant and args.server):
         print("Faltan --client/--plant/--server. Combinaciones disponibles:\n")
-        for cliente, planta, servidor in _combinaciones_disponibles():
+        for cliente, planta, servidor in combinaciones:
             print(f"  --client {cliente} --plant {planta} --server {servidor}")
         return
+
+    # Windows no distingue mayúsculas/minúsculas en rutas de archivo, pero Postgres sí -- un typo de
+    # mayúsculas aquí (ej. "AbINBEV" en vez de "AbInBev") encuentra las fotos igual (mismo archivo en
+    # disco) pero crea una cámara "fantasma" aparte en la base de datos, divorciada de la real
+    # (ROADMAP.md, 28/10/2026). Se normaliza contra la capitalización real encontrada en disco antes
+    # de tocar la base de datos.
+    coincidencia = next(
+        (c for c in combinaciones
+         if c[0].lower() == args.client.lower() and c[1].lower() == args.plant.lower()
+         and c[2].lower() == args.server.lower()),
+        None,
+    )
+    if coincidencia is None:
+        print(f"No se encontró {args.client}/{args.plant}/{args.server} (revisando mayúsculas/"
+              "minúsculas). Combinaciones disponibles:\n")
+        for cliente, planta, servidor in combinaciones:
+            print(f"  --client {cliente} --plant {planta} --server {servidor}")
+        return
+    cliente, planta, servidor = coincidencia
+    if (cliente, planta, servidor) != (args.client, args.plant, args.server):
+        print(f"Aviso: se normalizó a --client {cliente} --plant {planta} --server {servidor}")
+    args.client, args.plant, args.server = cliente, planta, servidor
 
     carpeta = IMAGE_BASE_ROOT / args.client / args.plant / args.server
     camaras = sorted(p.stem for p in carpeta.glob("*.jpg"))

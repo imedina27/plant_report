@@ -2449,10 +2449,83 @@ paso acordado: entender bien cómo está hecha la v1 actual antes de decidir qu�
     `crear_observacion`) contra una fila de prueba desechable, verificado y borrado por completo
     después -- no quedó nada de prueba en producción.
 
+- **Salud del servicio de IA, Fase 1: captura (27/10/2026)**. `[CAMARA]_ai.jpg` (ver "Estructura de
+  datos" arriba) es la salida de un servicio de IA aparte, que Plant Report nunca ha usado -- pero
+  el usuario notó que, si ese servicio está caído en un servidor, es un problema del lado de Quantum
+  Labs, no de la red/cámara del cliente, y hoy esa distinción no se reportaba en ningún lado.
+  - **Investigación sobre logs reales** (antes de tocar código): cada cámara del `.log` de servidor
+    reporta 4 pasos en orden fijo por nombre (`Puerto 80`, `Imagen IA`, `Imagen cámara`,
+    `Configuración`) -- si `Puerto 80` falla, los demás ni se intentan. Antes de eso, el servidor
+    intenta leer un YAML de configuración del servicio de IA por un puerto propio
+    (`YAML Read successful [200]` u otro código de error) -- si eso falla, es la señal directa de
+    que el servicio está caído, sin necesidad de inferir nada agregando resultados por cámara.
+    Encontrado con datos reales: `Pemex/TAD18DEMARZO/DEMOQUA` y `C5i_Colima/COLIMA01` llevaban
+    *días* con el YAML fallando, invisible hasta ahora. También se encontró que un mismo servidor
+    puede tener más de un puerto de IA activo (`Api_Manzanillo/APIMAN-FASE1` resultó tener 4:
+    `12046`, `12047`, `13045`, `13048`), cada uno con su propio bloque de YAML en el mismo log.
+  - **Problema real identificado y resuelto fuera de este repo**: cuando el YAML fallaba, el log no
+    registraba el puerto en ningún lado (ni con túnel SSH ni con Zerotier) -- imposible saber a cuál
+    puerto atribuir la falla en un servidor con varios. Se le pidió al programa externo de revisión
+    que imprima `Puerto IA configurado <N>` justo antes de cada intento de lectura de YAML, sin
+    importar si falla o no. Verificado contra una corrida de prueba en los 5 casos relevantes (los 2
+    que fallaban, el de 4 puertos, uno con túnel SSH y uno sano) -- quedó correcto y no rompió nada
+    del formato ya parseado.
+  - **Diseño confirmado con el usuario**: tablas nuevas `servicio_ia` (catálogo + estado vivo, uno
+    por `(cliente, planta, servidor, puerto)`, mismo patrón que `perfil_camara`) e
+    `historial_servicio_ia` (un renglón por día, mismo patrón que `historial_comparacion`) --
+    migración `migrations/0009_servicio_ia.sql`.
+  - `comparacion/log_parse.py`: nueva `parsear_servicios_ia_servidor()`, por nombre de campo (no
+    por posición, más robusto a cambios de orden aunque hoy el orden es fijo) -- regresa una entrada
+    por cada bloque `Puerto IA configurado` + su `YAML Read` correspondiente.
+  - `persistencia/db.py`: nueva `guardar_estado_servicio_ia()` (upsert catálogo + historial del día,
+    mismo patrón que `guardar_resultado()`).
+  - `main.py`: `_camaras_del_dia()` ahora regresa también `servicios_ia_por_servidor` (del mismo
+    `.log` ya leído, sin pasada extra); se persiste una vez por servidor, antes del ciclo de cámaras.
+    `scripts/backfill_reportes.py` (no toca la base de datos a propósito) solo ajustó el
+    desempaquetado del tercer valor, sin guardar nada.
+  - Probado: el parser contra los 5 casos reales de la corrida de prueba (reconstruidos como
+    fixtures después de que se borró la corrida, con el contenido ya verificado antes); el flujo
+    completo `_camaras_del_dia()` con una carpeta sintética tipo `CHECK_PLANTS_ROOT`; y
+    `guardar_estado_servicio_ia()` contra una fila desechable (`cliente='_TEST_'`) verificando
+    alta, cambio de estado (`estado_desde` se actualiza), upsert del mismo día sin duplicar, y
+    limpieza completa después -- no quedó nada de prueba en la base de datos real.
+  - **Pendiente (Fase 2)**: mostrar esto en el PDF del reporte ejecutivo -- se hace junto con el
+    siguiente punto, porque requiere revisar `reporte/datos_reporte.py` y
+    `reporte/reporte_ejecutivo.py` de todas formas.
+
+- **Bug real: `scripts/revisar_bases.py` creaba cámaras "fantasma" por mayúsculas (28/10/2026)**. El
+  usuario corrió varias sesiones de `scripts/revisar_bases.py` el 27/10 para reemplazar bases que se
+  veían mal, tecleando `--client`/`--plant` con una capitalización distinta a la real (ej. `AbINBEV`
+  en vez de `AbInBev`). Windows no distingue mayúsculas en rutas de archivo, así que las fotos sí se
+  reemplazaron correctamente en disco -- pero Postgres sí distingue mayúsculas, así que cada llamada
+  a `db.obtener_camara()`/`marcar_base_reemplazada()` creó una cámara "fantasma" aparte en vez de
+  tocar la fila real. Detectado al verificar la corrida diaria del 28/10 (la cuenta de cámaras por
+  cliente no cuadraba: apareció un cliente `AbINBEV` con 146 filas, cero historial, sin carpeta real
+  en ninguna de las 5 raíces de archivos).
+  - **Causa raíz corregida**: `scripts/revisar_bases.py` ahora normaliza `--client`/`--plant`/
+    `--server` contra la capitalización real encontrada en disco (`_combinaciones_disponibles()`)
+    antes de tocar la base de datos -- cualquier variante de mayúsculas resuelve a la combinación
+    real, y una que de verdad no exista da un error claro en vez de seguir en silencio. Probado
+    contra las combinaciones reales (`AbINBEV`/`ABINBEV` ambas resuelven a `AbInBev`; una
+    combinación inventada da `None`).
+  - **Alcance real identificado**: de las 146 filas fantasma, 26 sí habían pasado por un reemplazo de
+    verdad (su archivo en disco cambió) -- 13 en `ZACATECAS/QLYMSPROD01`, 12 en
+    `ZACATECAS/QLYMSPROD02`, 1 en `TOCANCIPA/QLYMSPROD05/EL`. En esas 26, `base_reemplazada_el`
+    (necesario para la promoción automática a mediana) y la observación de la bitácora habían
+    quedado en la fila fantasma en vez de la real. **Corregido**: las 26 filas reales ya tienen
+    `base_reemplazada_el = 2026-10-27` y su nota recuperada; las 146 filas fantasma (con sus
+    observaciones) se borraron después de extraer lo útil -- `historial_comparacion` no tenía
+    ninguna fila que perder ahí, confirmado antes de borrar.
+  - **Nota para seguimiento**: 2 de esas 26 (`TOCANCIPA/QLYMSPROD05/EL` y
+    `ZACATECAS/QLYMSPROD02/E3p`) se confirmaron como movimiento real (`mal`) en la corrida del mismo
+    28/10 -- posible que la foto elegida el 27/10 para esas dos no haya sido representativa. No se
+    investigó más a fondo, queda como observación para el usuario.
+
 - **Siguiente paso**: revisar a fondo el módulo del reporte ejecutivo en PDF --
   `reporte/datos_reporte.py` (arma los datos desde la base de datos) y
   `reporte/reporte_ejecutivo.py` (construye el PDF en sí, sin tocar ninguna base de datos). Mismo
-  tratamiento que los módulos anteriores: diagrama de flujo en `diagramas/` primero, y de ahí
-  decidir si hace falta alguna modificación (ej. cómo se ve la nueva escalada de `base
-  desactualizada` a los 3 días, o cualquier otro ajuste que surja de revisarlo con calma). Sigue
-  pendiente -- la sesión del 27/10/2026 se fue en el arreglo de la base "fantasma" de arriba.
+  tratamiento que los módulos anteriores: diagrama de flujo en `diagramas/` primero, y de ahí decidir
+  cómo encaja la Fase 2 de salud del servicio de IA (arriba), además de cualquier otro ajuste que
+  surja de revisarlo con calma (ej. cómo se ve la escalada de `base_desactualizada` a los 3 días).
+  Sigue pendiente -- las sesiones del 27/10/2026 se fueron en el arreglo de la base "fantasma" y en
+  la Fase 1 de salud del servicio de IA, ambas de arriba.
