@@ -323,13 +323,104 @@ def camaras_con_base_desactualizada(conn: psycopg2.extensions.connection) -> lis
 
 def crear_observacion(conn: psycopg2.extensions.connection, camara_id: int, texto: str) -> None:
     """Agrega una nota de contexto a la bitácora de la cámara (ROADMAP.md, "Observaciones por
-    cámara"). Se captura desde `ventana_revision.py` al resolver un `REVISAR`; cerrarlas o editarlas
-    queda para el programa de administración aparte (fuera de este repo)."""
+    cámara"). Se captura desde `ventana_revision.py` al resolver un `REVISAR`, y desde
+    `scripts/ventana_observaciones.py` (29/10/2026) para cualquier otra cámara."""
     with conn, conn.cursor() as cur:
         cur.execute(
             "INSERT INTO observacion_camara (camara_id, texto) VALUES (%s, %s)",
             (camara_id, texto),
         )
+
+
+def listar_camaras(conn: psycopg2.extensions.connection) -> list[dict]:
+    """Catálogo completo de cámaras -- para la navegación tipo directorio (cliente/planta/
+    servidor/cámara) de `scripts/ventana_observaciones.py` (ROADMAP.md, 29/10/2026)."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT id, cliente, planta, servidor, camara
+            FROM perfil_camara
+            ORDER BY cliente, planta, servidor, camara
+            """
+        )
+        return [
+            {"id": id_, "cliente": cliente, "planta": planta, "servidor": servidor, "camara": camara}
+            for id_, cliente, planta, servidor, camara in cur.fetchall()
+        ]
+
+
+def observaciones_vigentes_de_camara(
+    conn: psycopg2.extensions.connection, camara_id: int, dias_resuelta_visible: int,
+) -> list[dict]:
+    """Observaciones vigentes de una sola cámara -- activas, o resueltas hace `dias_resuelta_visible`
+    días o menos -- para `scripts/ventana_observaciones.py` (ROADMAP.md, 29/10/2026). Mismo criterio
+    que `observaciones_para_reporte()`/el PDF, pero contra `CURRENT_DATE` (esta herramienta es en
+    vivo, no reproduce un reporte pasado) y para una sola cámara en vez de un lote."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT id, texto, creado_en, resuelta_en
+            FROM observacion_camara
+            WHERE camara_id = %s
+              AND (resuelta_en IS NULL OR resuelta_en::date >= CURRENT_DATE - %s::int)
+            ORDER BY creado_en
+            """,
+            (camara_id, dias_resuelta_visible),
+        )
+        return [
+            {"id": id_, "texto": texto, "creado_en": creado_en, "resuelta": resuelta_en is not None}
+            for id_, texto, creado_en, resuelta_en in cur.fetchall()
+        ]
+
+
+def marcar_observacion_resuelta(conn: psycopg2.extensions.connection, observacion_id: int) -> None:
+    """Cierra una observación de la bitácora -- primer lugar en todo el repo que de verdad escribe
+    `resuelta_en` (ROADMAP.md, 29/10/2026, `scripts/ventana_observaciones.py`); hasta ahora quedaba
+    listo para esto pero nada lo usaba (ver `observaciones_para_reporte`)."""
+    with conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE observacion_camara SET resuelta_en = now() WHERE id = %s",
+            (observacion_id,),
+        )
+
+
+def camaras_con_observaciones_vigentes(
+    conn: psycopg2.extensions.connection, dias_resuelta_visible: int,
+) -> set[int]:
+    """`camara_id` de toda cámara con al menos una observación vigente hoy (activa, o resuelta hace
+    `dias_resuelta_visible` días o menos) -- para el punto verde del árbol de
+    `scripts/ventana_observaciones.py` (ROADMAP.md, 29/10/2026). A diferencia de
+    `observaciones_para_reporte()`, aquí la ventana se cuenta contra `CURRENT_DATE` (hoy de verdad),
+    no contra la fecha de un reporte -- esta herramienta es en vivo, no reproduce el pasado."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT DISTINCT camara_id FROM observacion_camara
+            WHERE resuelta_en IS NULL OR resuelta_en::date >= CURRENT_DATE - %s::int
+            """,
+            (dias_resuelta_visible,),
+        )
+        return {camara_id for (camara_id,) in cur.fetchall()}
+
+
+def camara_tiene_observacion_vigente(
+    conn: psycopg2.extensions.connection, camara_id: int, dias_resuelta_visible: int,
+) -> bool:
+    """Igual que `camaras_con_observaciones_vigentes()` pero para una sola cámara -- para refrescar
+    su punto verde en el árbol justo después de Guardar/Aceptar, sin volver a consultar las 300+
+    cámaras completas."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT EXISTS (
+                SELECT 1 FROM observacion_camara
+                WHERE camara_id = %s
+                  AND (resuelta_en IS NULL OR resuelta_en::date >= CURRENT_DATE - %s::int)
+            )
+            """,
+            (camara_id, dias_resuelta_visible),
+        )
+        return cur.fetchone()[0]
 
 
 def observaciones_para_reporte(

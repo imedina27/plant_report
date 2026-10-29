@@ -28,6 +28,20 @@ siendo la fuente de verdad del proyecto.
   del bug de cámaras fantasma, 28/10/2026), se reescribieron a este mismo formato corto y se
   marcaron como resueltas (`resuelta_en = base_reemplazada_el`, 27/10/2026 en las 26).
 
+### Agregado
+
+- `scripts/ventana_observaciones.py`: herramienta temporal (ver ROADMAP.md) para solucionar
+  observaciones y agregar observaciones nuevas en cualquier cámara, navegando por
+  cliente/planta/servidor/cámara en un árbol expandible (`ttk.Treeview`), con punto verde junto a
+  cada cámara con observación vigente (activa, o resuelta hace 15 días o menos). El panel de la
+  cámara muestra activas y resueltas dentro de esos 15 días (igual que el PDF) -- las resueltas
+  tachadas, con su botón "Solucionar" deshabilitado. Nuevas `db.listar_camaras()`,
+  `db.observaciones_vigentes_de_camara()`, `db.marcar_observacion_resuelta()` (la primera función en
+  todo el repo que marca `resuelta_en`), `db.camaras_con_observaciones_vigentes()` y
+  `db.camara_tiene_observacion_vigente()`.
+- `C:\Users\Meki\Documents\ventana_observaciones.ps1`: lanzador fuera del repo para abrir
+  `scripts/ventana_observaciones.py` desde la línea de comandos (ver `CLAUDE.local.md`).
+
 ### Corregido
 
 - `comparacion/image_compare.py`, `_orb_ransac()`: con exactamente 1 inlier sobreviviendo RANSAC,
