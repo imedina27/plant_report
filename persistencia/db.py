@@ -374,7 +374,11 @@ def marcar_base_reemplazada(conn: psycopg2.extensions.connection, cliente: str, 
                              servidor: str, camara: str) -> None:
     """Confirma el reemplazo de una base: la cámara vuelve a verde (ROADMAP.md, sección 2.8), y
     queda marcada para promover su base a mediana en cuanto se junte suficiente historial fresco
-    (ver ROADMAP.md, 26/10/2026, paso 3 -- `base_reemplazada_el`)."""
+    (ver ROADMAP.md, 26/10/2026, paso 3 -- `base_reemplazada_el`).
+
+    También deja una nota corta en la bitácora (`observacion_camara`, pedido 29/10/2026) -- antes
+    ningún llamador (`main.py`, `ui/ventana_bases.py`) dejaba rastro automático de un reemplazo, solo
+    lo que el humano hubiera escrito a mano (si acaso) en el campo de observación opcional."""
     with conn, conn.cursor() as cur:
         cur.execute(
             """
@@ -382,8 +386,14 @@ def marcar_base_reemplazada(conn: psycopg2.extensions.connection, cliente: str, 
             SET estado_actual = 'verde', estado_desde = CURRENT_DATE,
                 base_reemplazada_el = CURRENT_DATE, actualizado_en = now()
             WHERE cliente = %s AND planta = %s AND servidor = %s AND camara = %s
+            RETURNING id, base_reemplazada_el
             """,
             (cliente, planta, servidor, camara),
+        )
+        camara_id, fecha_reemplazo = cur.fetchone()
+        cur.execute(
+            "INSERT INTO observacion_camara (camara_id, texto) VALUES (%s, %s)",
+            (camara_id, f"Base reemplazada el {fecha_reemplazo:%d/%m/%Y}."),
         )
 
 

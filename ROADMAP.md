@@ -2937,3 +2937,29 @@ paso acordado: entender bien cómo está hecha la v1 actual antes de decidir qu�
   - Confirmado con el usuario: este cambio aplica a **cualquier fecha** que se (re)genere, no solo al
     día de la corrida -- vive en el código, no en los datos. Lo único que varía según la fecha es qué
     observaciones caen dentro de la ventana de 15 días, no si el formato nuevo aplica.
+
+- **Nota automática de reemplazo de base + limpieza de las 26 notas viejas (29/10/2026)**. El usuario
+  notó que las observaciones de reemplazo de base traían un texto larguísimo y técnico (la nota
+  manual que redacté durante la recuperación del bug de cámaras fantasma, 28/10/2026) -- pidió que en
+  su lugar solo dijera "Base Reemplazada [fecha]".
+  - **Investigado antes de tocar nada**: el texto largo **no lo genera ningún código vivo hoy** --
+    `scripts/revisar_bases.py` (que el usuario mencionó) no tiene ni botón de reemplazo, solo "Bien"
+    y "Base Desactualizada". El reemplazo real pasa por `main.py` (veredicto "Actualizar Base") o por
+    `ui/ventana_bases.py`, y **ninguno de los dos deja hoy ninguna nota automática** -- confirmado
+    leyendo ambos: solo se guarda lo que el humano haya escrito a mano en el campo opcional de
+    observación (si acaso). El texto largo fue, en su momento, una nota escrita a mano por mí durante
+    esa recuperación, no algo que el programa produzca en su operación normal.
+  - **Decidido con el usuario**: combinar sus 2 opciones en vez de elegir una -- reescribir el texto
+    de las 26 filas reales al formato corto **y** marcarlas como resueltas de una vez, aprovechando
+    la regla de 15 días recién construida (en vez de dejarlas "activas" para siempre, que es
+    exactamente el mismo problema de fondo con menos palabras).
+  - **Código**: `db.marcar_base_reemplazada()` ahora inserta la nota "Base reemplazada el DD/MM/AAAA."
+    dentro de la misma transacción (vía `RETURNING id, base_reemplazada_el` del `UPDATE`) -- un solo
+    lugar, cubre ambos llamadores (`main.py` y `ui/ventana_bases.py`) sin duplicar lógica. Probado en
+    una transacción contra la BD real que se revirtió (`conn.rollback()`) antes del commit -- se
+    confirmó que no dejó ningún rastro (estado y observación de la cámara de prueba sin cambios).
+  - **Datos**: `UPDATE` real sobre las 26 filas (identificadas por su texto exacto, confirmado antes
+    por separado de las otras 5 observaciones reales que no debían tocarse) -- texto reescrito a
+    `"Base reemplazada el 27/10/2026."` y `resuelta_en = base_reemplazada_el` (27/10/2026 en las 26,
+    la fecha real del reemplazo, no la fecha de esta limpieza). Con la ventana de 15 días, se seguirán
+    viendo tachadas en los reportes hasta el 11/11/2026, y después desaparecen solas.

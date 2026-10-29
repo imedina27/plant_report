@@ -21,6 +21,12 @@ siendo la fuente de verdad del proyecto.
   la más vieja a la más nueva. Las resueltas se muestran tachadas y siguen visibles 15 días desde la
   fecha del reporte (no desde la fecha real de corrida); después de esa ventana dejan de aparecer.
   Nueva `db.observaciones_para_reporte()` (antes `observaciones_activas()`, solo traía las activas).
+- `db.marcar_base_reemplazada()`: ahora deja una nota corta en la bitácora ("Base reemplazada el
+  DD/MM/AAAA.") cada vez que se reemplaza una base -- antes ningún llamador (`main.py`,
+  `ui/ventana_bases.py`) dejaba rastro automático. Limpieza de datos: las 26 observaciones reales de
+  reemplazos ya hechos, que traían una nota larga y técnica (redactada a mano durante la recuperación
+  del bug de cámaras fantasma, 28/10/2026), se reescribieron a este mismo formato corto y se
+  marcaron como resueltas (`resuelta_en = base_reemplazada_el`, 27/10/2026 en las 26).
 
 ### Corregido
 
