@@ -288,7 +288,12 @@ def evaluar_par(base: np.ndarray, actual: np.ndarray, calibrado_px: float | None
     status: "OK" | "REVISAR" | "NO CONCLUYENTE" | "RESOLUCION DISTINTA"
     """
     if base.shape != actual.shape:
-        return {"status": "RESOLUCION DISTINTA", "motivo": "resoluciones distintas",
+        # Las dimensiones van en el motivo (no solo "resoluciones distintas") para que el reporte
+        # ejecutivo pueda mostrarlas tal cual, sin tener que recalcularlas aparte (ROADMAP.md,
+        # 28/10/2026 -- caso real: una base reemplazada por error con una foto de otro tamaño).
+        bh, bw = base.shape[:2]
+        ah, aw = actual.shape[:2]
+        return {"status": "RESOLUCION DISTINTA", "motivo": f"Base: {bw} x {bh} | Hoy: {aw} x {ah}",
                 "orb_inliers": None, "orb_desp": None, "fase_desp": None, "fase_conf": None,
                 "contenido_mean": None, "contenido_p95": None,
                 "orb_tx": None, "orb_ty": None, "orb_rotacion_deg": None, "orb_escala": None}

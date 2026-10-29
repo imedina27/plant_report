@@ -47,7 +47,6 @@ LOGO = Path(__file__).parent.parent / "assets" / "QuantumLab-Logo-01.png"
 MARGEN_PT = 24
 ANCHO_CONTENIDO_PT = letter[0] - 2 * MARGEN_PT
 _GAP_ENCABEZADO_PT = 22
-ALTO_PIE_PT = 20
 
 ANCHO_LOGO_PT = 130
 ANCHO_ETQ_ENC_PT = 75
@@ -71,7 +70,7 @@ GRIS_VACIO = colors.HexColor("#C8C8CD")  # "sin datos", no un error
 
 _COLOR_ESTADO = {
     "verde": VERDE, "amarillo": AMBAR, "ambar": AMBAR, "rojo": ROJO, "morado": MORADO,
-    "base_desactualizada": AZUL,
+    "base_desactualizada": AZUL, "ok": VERDE, "caido": ROJO,
 }
 
 _ESTILO_ETQ = ParagraphStyle(
@@ -114,12 +113,17 @@ class MontajeDisco:
 @dataclass
 class CamaraFalla:
     camara: str
-    estado: str  # "morado" | "rojo" | "base_desactualizada" -- color de la celda (el ámbar ya no
-    # llega aquí: desde el 3er día seguido se convierte en morado, ver db._siguiente_estado)
+    estado: str  # color de la celda -- "rojo" | "ambar" | "morado" | "base_desactualizada"
     etiqueta: str  # texto que se muestra en "Estado" (ej. "Cámara sin respuesta") -- descriptivo, no el color crudo
-    motivo: str  # detalle técnico puro (ej. "Puerto 80 Timed out [111]")
+    motivo: str  # detalle técnico, sin el código de error final (no es relevante para el cliente,
+    # ver datos_reporte._sin_codigo_error -- ROADMAP.md 28/10/2026)
     ruta_base: Path | None = None  # None = sin imagen que mostrar (ej. cámara sin respuesta ese día)
     ruta_actual: Path | None = None
+    # Campos que cambiaron en la configuración (mismo formato que config_compare.compare():
+    # {categoria, campo, base, actual}) -- se usa en vez de ruta_base/ruta_actual para "Cambió la
+    # configuración" (ROADMAP.md, 28/10/2026): ahí no hay 2 imágenes que mostrar, son 2 paneles de
+    # texto con los campos que cambiaron, igual que en `ui/ventana_revision.pedir_revision_config()`.
+    config_diferencias: list[dict] | None = None
 
 
 @dataclass
@@ -133,6 +137,10 @@ class ResumenServidor:
     camaras_ok: int
     camaras_no_concluyentes: int  # ámbar de 1-2 días -- al 3ro pasa a "fallas" (ver datos_reporte.py)
     fallas: list[CamaraFalla] = field(default_factory=list)
+    # (puerto, estado) por cada puerto de IA conocido de este servidor ese día -- estado "ok"/"caido"
+    # (ver persistencia/db.py, servicio_ia). Lista vacía = nunca se conoció un puerto para este
+    # servidor (caso excepcional, ver _texto_vision_stream). ROADMAP.md, 28/10/2026.
+    vision_stream: list[tuple[int, str]] = field(default_factory=list)
 
 
 def _p(texto: str, estilo: ParagraphStyle) -> Paragraph:
@@ -149,15 +157,36 @@ def _celda_estado(etiqueta: str, color: colors.Color | None = None) -> Paragraph
 def _estilo_base_tabla(*, banda_colspan: int, filas: int) -> list[tuple]:
     cmds = [
         ("GRID", (0, 0), (-1, -1), 0.75, BORDE),
+        # Mismo borde externo grueso que ya tiene el encabezado (_estilo_encabezado) -- pedido del
+        # usuario, 28/10/2026, para que las tablas se vean consistentes entre sí. Van los índices
+        # literales (0 / -1) Y las palabras clave "splitfirst"/"splitlast" a la vez -- no son
+        # intercambiables: ReportLab ignora por completo "splitfirst"/"splitlast" cuando la tabla
+        # termina cabiendo en una sola hoja (ver _drawLines en tables.py), así que sin los literales
+        # una tabla corta se quedaba sin borde arriba/abajo. Y un BOX/LINEABOVE/LINEBELOW literal
+        # por sí solo no sobrevive el corte entre hojas (el pedazo de arriba se queda sin borde de
+        # abajo y el de abajo sin borde de arriba) -- de ahí que haga falta también la versión
+        # simbólica, que ReportLab solo resuelve en el punto de corte real. Confirmado con un PDF de
+        # prueba mínimo cubriendo ambos casos (tabla que no corta y tabla que sí corta).
+        ("LINEBEFORE", (0, 0), (0, -1), 1.75, BORDE),
+        ("LINEAFTER", (-1, 0), (-1, -1), 1.75, BORDE),
+        ("LINEABOVE", (0, 0), (-1, 0), 1.75, BORDE),
+        ("LINEBELOW", (0, -1), (-1, -1), 1.75, BORDE),
+        ("LINEABOVE", (0, "splitfirst"), (-1, "splitfirst"), 1.75, BORDE),
+        ("LINEBELOW", (0, "splitlast"), (-1, "splitlast"), 1.75, BORDE),
         ("SPAN", (0, 0), (banda_colspan - 1, 0)),
         ("BACKGROUND", (0, 0), (banda_colspan - 1, 0), NEGRO),
+        # Fila 1 son siempre los títulos de columna (Servidor/CPU/..., Cámara/Estado/Motivo,
+        # Servicios/Puertos...) en las 3 tablas que usan este estilo -- mismo gris que las etiquetas
+        # del encabezado (ETIQUETA_FONDO), en vez de perderse en el rayado blanco/franja normal de
+        # las filas de datos (pedido del usuario, 28/10/2026).
+        ("BACKGROUND", (0, 1), (-1, 1), ETIQUETA_FONDO),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ("TOPPADDING", (0, 0), (-1, -1), 3),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
         ("LEFTPADDING", (0, 0), (-1, -1), 6),
         ("RIGHTPADDING", (0, 0), (-1, -1), 6),
     ]
-    for fila in range(1, filas):
+    for fila in range(2, filas):
         if fila % 2 == 1:
             cmds.append(("BACKGROUND", (0, fila), (-1, fila), FRANJA))
     return cmds
@@ -211,23 +240,20 @@ def _tabla_encabezado_detalle(cliente: str, planta: str, fecha: date, servidor: 
     return t
 
 
-def _tabla_pie(cliente: str, num_hoja: int, total_hojas: int) -> Table:
-    t = Table(
-        [[
-            _p("Quantum Labs Computer Vision", _ESTILO_PIE),
-            _p(f"Hoja {num_hoja} de {total_hojas}", _ESTILO_PIE_CENTRO),
-            _p(cliente, _ESTILO_PIE_DER),
-        ]],
-        colWidths=[ANCHO_CONTENIDO_PT / 3] * 3,
-    )
-    t.setStyle(TableStyle([
-        ("LINEABOVE", (0, 0), (-1, 0), 0.75, BORDE),
-        ("TOPPADDING", (0, 0), (-1, -1), 4),
-    ]))
-    return t
-
-
-_SIMBOLOGIA = [
+_SIMBOLOGIA_RESUMEN = [
+    # Para la hoja 1 (sección de servidores) -- describe únicamente los colores que de verdad
+    # aparecen ahí (CPU/GPU/Disco): el detalle de cámaras usa su propia simbología, ver
+    # `_SIMBOLOGIA_DETALLE` (ROADMAP.md, 28/10/2026 -- antes esta misma lista mezclaba los
+    # significados de las dos secciones, y morado/azul no se usan para nada en esta hoja).
+    (VERDE, "OK"),
+    (AMBAR, "Cerca del umbral"),
+    (ROJO, "Requiere revisión inmediata"),
+    (GRIS, "Sin datos de monitoreo"),
+]
+_SIMBOLOGIA_DETALLE = [
+    # Para el pie de las hojas de detalle por servidor (ROADMAP.md, 28/10/2026) -- es la simbología
+    # original de 6 colores que tenía la hoja de resumen antes de separarla; se reutiliza tal cual
+    # aquí, a pedido del usuario.
     (VERDE, "OK"),
     (AMBAR, "No concluyente (1-2 días) / configuración no disponible"),
     (ROJO, "Falla confirmada / cámara o imagen sin respuesta"),
@@ -240,21 +266,33 @@ _ESTILO_SIMBOLOGIA = ParagraphStyle(
 )
 
 
-def _texto_simbologia() -> Paragraph:
-    partes = [f'<font color="{color.hexval()}">■</font> {etiqueta}' for color, etiqueta in _SIMBOLOGIA]
-    return Paragraph("&nbsp;&nbsp;&nbsp;&nbsp;".join(partes), _ESTILO_SIMBOLOGIA)
+def _texto_simbologia(simbologia: list[tuple]) -> Paragraph:
+    """Cada entrada (bala + etiqueta) va con espacios duros adentro -- para que, si no cabe todo en
+    una sola línea, el salto caiga ENTRE entradas y no a la mitad de una etiqueta de varias palabras
+    (bug real reportado por el usuario: "Base de" quedaba en una línea e "imágenes desactualizada"
+    en la siguiente). El espacio normal queda solo como separador entre entradas -- ahí sí puede
+    saltar de línea."""
+    partes = [
+        f'<font color="{color.hexval()}">■</font>&nbsp;{etiqueta.replace(" ", "&nbsp;")}'
+        for color, etiqueta in simbologia
+    ]
+    # Separador entre entradas: varios espacios duros (ancho garantizado, para que el cuadro de
+    # color de una entrada no se vea pegado al texto de la anterior) + uno normal al final, el
+    # único punto donde se permite el salto de línea entre entradas (pedido del usuario, 28/10/2026).
+    return Paragraph("&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; ".join(partes), _ESTILO_SIMBOLOGIA)
 
 
-def _tabla_pie_resumen(cliente: str, num_hoja: int, total_hojas: int) -> Table:
-    """Solo para la hoja 1 -- agrega una línea de simbología (qué significa cada color) arriba del
-    pie normal. En las hojas de detalle no hace falta: ahí el contexto ya es un solo servidor."""
+def _tabla_pie(cliente: str, num_hoja: int, total_hojas: int, simbologia: list[tuple]) -> Table:
+    """Pie de página con su línea de simbología arriba (qué significa cada color) -- ambas
+    secciones del reporte la llevan, cada una con la suya (`_SIMBOLOGIA_RESUMEN`/
+    `_SIMBOLOGIA_DETALLE`, ROADMAP.md 28/10/2026): antes solo la hoja de resumen la tenía."""
     fila_pie = [
         _p("Quantum Labs Computer Vision", _ESTILO_PIE),
         _p(f"Hoja {num_hoja} de {total_hojas}", _ESTILO_PIE_CENTRO),
         _p(cliente, _ESTILO_PIE_DER),
     ]
     t = Table(
-        [[_texto_simbologia(), "", ""], fila_pie],
+        [[_texto_simbologia(simbologia), "", ""], fila_pie],
         colWidths=[ANCHO_CONTENIDO_PT / 3] * 3,
     )
     t.setStyle(TableStyle([
@@ -314,7 +352,7 @@ def _imagen_proporcional(path: Path, ancho_pt: float) -> Image | None:
     return Image(buf, width=ancho_pt, height=alto_pt)
 
 
-_GUTTER_IMAGENES_PT = 10
+_GUTTER_IMAGENES_PT = 5  # pedido del usuario, 28/10/2026 -- antes 10, se sentía grande
 _ESTILO_IMAGEN_NO_DISPONIBLE = ParagraphStyle(
     "img_no_disp", fontName="Helvetica-Oblique", fontSize=8.5, textColor=GRIS, alignment=TA_CENTER,
 )
@@ -325,19 +363,70 @@ def _celda_imagen(path: Path, ancho_pt: float):
 
 
 def _fila_imagenes(ruta_base: Path, ruta_actual: Path) -> Table:
-    ancho_img = (ANCHO_CONTENIDO_PT - _GUTTER_IMAGENES_PT) / 2
+    # Columnas de margen (0 y 4) del mismo ancho que el gutter entre los 2 recuadros (2) -- sin
+    # esto, los recuadros quedaban pegados al margen de la página mientras que entre ellos sí había
+    # separación (pedido del usuario, 28/10/2026).
+    ancho_img = (ANCHO_CONTENIDO_PT - 3 * _GUTTER_IMAGENES_PT) / 2
     data = [
-        [_p("Base", _ESTILO_ETQ), "", _p("Actual", _ESTILO_ETQ)],
-        [_celda_imagen(ruta_base, ancho_img), "", _celda_imagen(ruta_actual, ancho_img)],
+        ["", _p("Base", _ESTILO_ETQ), "", _p("Actual", _ESTILO_ETQ), ""],
+        ["", _celda_imagen(ruta_base, ancho_img), "", _celda_imagen(ruta_actual, ancho_img), ""],
     ]
-    t = Table(data, colWidths=[ancho_img, _GUTTER_IMAGENES_PT, ancho_img])
+    t = Table(
+        data,
+        colWidths=[_GUTTER_IMAGENES_PT, ancho_img, _GUTTER_IMAGENES_PT, ancho_img, _GUTTER_IMAGENES_PT],
+    )
     t.setStyle(TableStyle([
         ("ALIGN", (0, 0), (-1, -1), "CENTER"),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("BOX", (0, 0), (0, -1), 0.75, BORDE),
-        ("BOX", (2, 0), (2, -1), 0.75, BORDE),
-        ("TOPPADDING", (1, 0), (1, 0), 4), ("BOTTOMPADDING", (0, 0), (-1, 0), 2),
+        ("BOX", (1, 0), (1, -1), 0.75, BORDE),
+        ("BOX", (3, 0), (3, -1), 0.75, BORDE),
+        ("BOTTOMPADDING", (0, 0), (-1, 0), 2),
         ("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+    ]))
+    return t
+
+
+_ESTILO_CONFIG_DIFF = ParagraphStyle(
+    "config_diff", fontName="Helvetica", fontSize=8, textColor=NEGRO, alignment=TA_LEFT, leading=11,
+)
+
+
+def _texto_config_diff(diferencias: list[dict], clave_valor: str) -> Paragraph:
+    """`clave_valor` es `"base"` o `"actual"` -- la misma lista de diferencias alimenta los 2
+    paneles, cada uno mostrando su propio lado (ROADMAP.md, 28/10/2026, igual criterio que
+    `ui/ventana_revision.pedir_revision_config()`: agrupado por categoría, solo los campos que
+    cambiaron, nunca el .json completo)."""
+    por_categoria: dict[str, list[dict]] = {}
+    for d in diferencias:
+        por_categoria.setdefault(d["categoria"], []).append(d)
+    lineas = []
+    for categoria, items in sorted(por_categoria.items()):
+        lineas.append(f"<b>{categoria}</b>")
+        lineas.extend(f"{item['campo']}: {item[clave_valor]}" for item in items)
+    return _p("<br/>".join(lineas) if lineas else "(sin cambios)", _ESTILO_CONFIG_DIFF)
+
+
+def _fila_config_diff(diferencias: list[dict]) -> Table:
+    # Mismas columnas de margen que _fila_imagenes(), y por la misma razón (ROADMAP.md, 28/10/2026).
+    ancho_panel = (ANCHO_CONTENIDO_PT - 3 * _GUTTER_IMAGENES_PT) / 2
+    data = [
+        ["", _p("Configuración Base", _ESTILO_ETQ), "", _p("Configuración Hoy", _ESTILO_ETQ), ""],
+        ["", _texto_config_diff(diferencias, "base"), "", _texto_config_diff(diferencias, "actual"), ""],
+    ]
+    t = Table(
+        data,
+        colWidths=[_GUTTER_IMAGENES_PT, ancho_panel, _GUTTER_IMAGENES_PT, ancho_panel, _GUTTER_IMAGENES_PT],
+    )
+    t.setStyle(TableStyle([
+        ("ALIGN", (1, 0), (3, 0), "CENTER"),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("BOX", (1, 0), (1, -1), 0.75, BORDE),
+        ("BOX", (3, 0), (3, -1), 0.75, BORDE),
+        ("TOPPADDING", (0, 0), (-1, 0), 4), ("BOTTOMPADDING", (0, 0), (-1, 0), 2),
+        ("TOPPADDING", (0, 1), (-1, 1), 6), ("BOTTOMPADDING", (0, 1), (-1, 1), 6),
+        ("LEFTPADDING", (1, 1), (1, 1), 8), ("LEFTPADDING", (3, 1), (3, 1), 8),
+        ("RIGHTPADDING", (1, 1), (1, 1), 8), ("RIGHTPADDING", (3, 1), (3, 1), 8),
+        ("LEFTPADDING", (0, 0), (-1, 0), 0), ("RIGHTPADDING", (0, 0), (-1, 0), 0),
     ]))
     return t
 
@@ -367,22 +456,52 @@ def _tabla_resumen_servidores(cliente: str, servidores: list[ResumenServidor]) -
     ]
     data = [[_p("RESUMEN DE SERVIDORES", _ESTILO_BANDA)] + [""] * 7, encabezados]
     for s in servidores:
-        n_fallas = len(s.fallas)
-        color_fallas = ROJO if n_fallas else VERDE
-        color_no_concl = AMBAR if s.camaras_no_concluyentes else NEGRO
+        # Cámaras distintas, no filas de falla -- una misma cámara puede tener una fila por imagen
+        # y otra por configuración (ejes independientes, ROADMAP.md 28/10/2026); sin esto el conteo
+        # podía superar camaras_totales.
+        n_fallas = len({f.camara for f in s.fallas})
+        # Las 4 columnas de conteo de cámaras van siempre en negro (ROADMAP.md, 28/10/2026) -- un
+        # color ahí se confundía con la simbología del pie (que ahora describe CPU/GPU/Disco, no
+        # cámaras). El detalle de qué cámara tiene qué problema ya vive en la sección siguiente.
         data.append([
             _p(f"{s.nombre}<br/><font size=7 color='#8A8A92'>{s.planta}</font>", _ESTILO_VAL),
             _texto_metrica(s.cpu),
             _texto_metrica(s.gpu),
             _texto_discos(s.discos, _ANCHO_COL_DISCOS_PT - 12),  # -12: el LEFT/RIGHTPADDING de la celda
             _celda_estado(str(s.camaras_totales)),
-            _celda_estado(str(s.camaras_ok), VERDE),
-            _celda_estado(str(s.camaras_no_concluyentes), color_no_concl),
-            _celda_estado(str(n_fallas), color_fallas),
+            _celda_estado(str(s.camaras_ok)),
+            _celda_estado(str(s.camaras_no_concluyentes)),
+            _celda_estado(str(n_fallas)),
         ])
     anchos = [ANCHO_CONTENIDO_PT * f for f in (0.19, 0.11, 0.11, 0.18, 0.09, 0.09, 0.11, 0.12)]
     t = Table(data, colWidths=anchos)
     t.setStyle(TableStyle(_estilo_base_tabla(banda_colspan=8, filas=len(data))))
+    return t
+
+
+def _texto_vision_stream(vision_stream: list[tuple[int, str]]) -> Paragraph:
+    """Todos los puertos de IA conocidos de un servidor en una sola celda, cada uno coloreado según
+    su propio estado ese día (un servidor puede tener más de uno, ej. Api_Manzanillo con 4) --
+    "Puerto Desconocido" en el caso excepcional de que nunca se haya conocido ninguno (ROADMAP.md,
+    28/10/2026)."""
+    if not vision_stream:
+        return _celda_estado("Puerto Desconocido")
+    partes = [
+        f'<font color="{_COLOR_ESTADO.get(estado, NEGRO).hexval()}">{puerto}</font>'
+        for puerto, estado in sorted(vision_stream)
+    ]
+    return _p(", ".join(partes), _ESTILO_VAL)
+
+
+def _tabla_vision_stream(servidor: ResumenServidor) -> Table:
+    data = [
+        [_p("SISTEMA DE VISIÓN-STREAM", _ESTILO_BANDA), ""],
+        [_p(f"Servicios en {servidor.nombre}", _ESTILO_ETQ), _p("Puerto(s) Utilizado(s)", _ESTILO_ETQ)],
+        [_p("Vision-Stream", _ESTILO_VAL), _texto_vision_stream(servidor.vision_stream)],
+    ]
+    anchos = [ANCHO_CONTENIDO_PT * 0.5, ANCHO_CONTENIDO_PT * 0.5]
+    t = Table(data, colWidths=anchos)
+    t.setStyle(TableStyle(_estilo_base_tabla(banda_colspan=2, filas=len(data))))
     return t
 
 
@@ -405,6 +524,12 @@ def _tabla_fallas_servidor(servidor: ResumenServidor) -> Table:
         if f.ruta_base is not None and f.ruta_actual is not None:
             filas_imagenes.append(len(data))
             data.append([_fila_imagenes(f.ruta_base, f.ruta_actual), "", ""])
+        elif f.config_diferencias is not None:
+            # "Cambió la configuración" (ROADMAP.md, 28/10/2026) -- mismo tratamiento visual que la
+            # fila de imágenes (span completo, sin fondo ni padding de la banda), pero con los 2
+            # paneles de texto en vez de 2 fotos.
+            filas_imagenes.append(len(data))
+            data.append([_fila_config_diff(f.config_diferencias), "", ""])
 
     anchos = [ANCHO_CONTENIDO_PT * f for f in (0.22, 0.16, 0.62)]
     t = Table(data, colWidths=anchos)
@@ -417,6 +542,10 @@ def _tabla_fallas_servidor(servidor: ResumenServidor) -> Table:
         # recuadro (bug real, visto en un PDF: la imagen "Actual" se salía del marco).
         estilo.append(("LEFTPADDING", (0, fila_idx), (2, fila_idx), 0))
         estilo.append(("RIGHTPADDING", (0, fila_idx), (2, fila_idx), 0))
+        # Arriba/abajo del recuadro, el mismo espacio que ya hay a los lados y al centro (pedido del
+        # usuario, 28/10/2026 -- para que el recuadro quede simétrico en las 4 direcciones).
+        estilo.append(("TOPPADDING", (0, fila_idx), (2, fila_idx), _GUTTER_IMAGENES_PT))
+        estilo.append(("BOTTOMPADDING", (0, fila_idx), (2, fila_idx), _GUTTER_IMAGENES_PT))
     t.setStyle(TableStyle(estilo))
     return t
 
@@ -433,29 +562,36 @@ def _dibujar_encabezado_pie(canvas, encabezado: Table, pie: Table) -> None:
 def construir_pdf(cliente: str, fecha: date, servidores: list[ResumenServidor], ruta_salida: Path) -> None:
     """Arma y guarda el PDF ejecutivo de un cliente: hoja 1 con el resumen de todos sus
     servidores (encabezado Cliente/Fecha -- no hay un solo servidor/planta que mostrar ahí), luego
-    una sección por servidor con al menos una cámara en falla (encabezado Cliente/Planta/Fecha/
-    Servidor, ya concreto). Cada servidor usa su propio `PageTemplate` -- si su tabla de fallas se
-    desborda a una segunda hoja física, esa continuación repite el mismo encabezado (misma lógica
-    que ReportLab ya usa para el pie: sigue aplicando el último `PageTemplate` activo hasta que
-    aparezca un `NextPageTemplate` nuevo)."""
+    una sección por cada servidor que tenga algo que reportar -- una cámara en falla, o su
+    Vision-Stream con al menos un puerto caído (ROADMAP.md, 28/10/2026; antes solo entraba aquí un
+    servidor con cámaras en falla) -- con encabezado Cliente/Planta/Fecha/Servidor, ya concreto.
+    Cada servidor usa su propio `PageTemplate` -- si su contenido se desborda a una segunda hoja
+    física, esa continuación repite el mismo encabezado (misma lógica que ReportLab ya usa para el
+    pie: sigue aplicando el último `PageTemplate` activo hasta que aparezca un `NextPageTemplate`
+    nuevo)."""
+    def _necesita_hoja_detalle(s: ResumenServidor) -> bool:
+        return bool(s.fallas) or any(estado == "caido" for _puerto, estado in s.vision_stream)
+
     # Mismo orden que _tabla_resumen_servidores (incluye el caso especial de AbInBev) -- antes esta
     # lista se quedaba en el orden alfabético simple de la consulta SQL, así que el resumen salía
     # bien ordenado pero las hojas de detalle por servidor no (bug real, reportado 22/10/2026).
-    servidores_con_fallas = sorted(
-        (s for s in servidores if s.fallas), key=lambda s: _clave_orden_servidor(cliente, s.nombre),
+    servidores_con_detalle = sorted(
+        (s for s in servidores if _necesita_hoja_detalle(s)),
+        key=lambda s: _clave_orden_servidor(cliente, s.nombre),
     )
 
-    # Los dos encabezados tienen alturas distintas (1 fila vs. 2) y los dos pies también (el de la
-    # hoja 1 trae además la línea de simbología) -- cada tipo de hoja necesita su propio alto de
-    # marco, calculado con datos de muestra (el alto no depende del contenido real: son párrafos de
-    # una sola línea con fuente fija).
+    # Los dos encabezados tienen alturas distintas (1 fila vs. 2), y los dos pies también (cada uno
+    # trae su propia línea de simbología, de distinto largo -- ROADMAP.md 28/10/2026) -- cada tipo
+    # de hoja necesita su propio alto de marco, calculado con datos de muestra (el alto no depende
+    # del contenido real: son párrafos de una sola línea con fuente fija).
     alto_enc_resumen = _tabla_encabezado_resumen(cliente, fecha).wrap(ANCHO_CONTENIDO_PT, letter[1])[1]
     alto_enc_detalle = _tabla_encabezado_detalle(cliente, "X", fecha, "X").wrap(ANCHO_CONTENIDO_PT, letter[1])[1]
-    alto_pie_resumen = _tabla_pie_resumen(cliente, 1, 1).wrap(ANCHO_CONTENIDO_PT, 200)[1]
+    alto_pie_resumen = _tabla_pie(cliente, 1, 1, _SIMBOLOGIA_RESUMEN).wrap(ANCHO_CONTENIDO_PT, 200)[1]
+    alto_pie_detalle = _tabla_pie(cliente, 1, 1, _SIMBOLOGIA_DETALLE).wrap(ANCHO_CONTENIDO_PT, 200)[1]
     frame_alto_resumen = (
         letter[1] - 2 * MARGEN_PT - alto_enc_resumen - alto_pie_resumen - _GAP_ENCABEZADO_PT
     )
-    frame_alto_detalle = letter[1] - 2 * MARGEN_PT - alto_enc_detalle - ALTO_PIE_PT - _GAP_ENCABEZADO_PT
+    frame_alto_detalle = letter[1] - 2 * MARGEN_PT - alto_enc_detalle - alto_pie_detalle - _GAP_ENCABEZADO_PT
 
     # Total de hojas no se sabe de antemano (el flujo de ReportLab decide cuántas hacen falta para
     # el detalle) -- se resuelve con un primer `build` mudo y el conteo real de páginas.
@@ -463,13 +599,13 @@ def construir_pdf(cliente: str, fecha: date, servidores: list[ResumenServidor], 
 
     def _on_resumen(canvas, doc):
         encabezado = _tabla_encabezado_resumen(cliente, fecha)
-        pie = _tabla_pie_resumen(cliente, canvas.getPageNumber(), contador_paginas["total"])
+        pie = _tabla_pie(cliente, canvas.getPageNumber(), contador_paginas["total"], _SIMBOLOGIA_RESUMEN)
         _dibujar_encabezado_pie(canvas, encabezado, pie)
 
     def _hacer_on_detalle(servidor: ResumenServidor):
         def _on_detalle(canvas, doc):
             encabezado = _tabla_encabezado_detalle(cliente, servidor.planta, fecha, servidor.nombre)
-            pie = _tabla_pie(cliente, canvas.getPageNumber(), contador_paginas["total"])
+            pie = _tabla_pie(cliente, canvas.getPageNumber(), contador_paginas["total"], _SIMBOLOGIA_DETALLE)
             _dibujar_encabezado_pie(canvas, encabezado, pie)
         return _on_detalle
 
@@ -479,9 +615,9 @@ def construir_pdf(cliente: str, fecha: date, servidores: list[ResumenServidor], 
             id="f_resumen", topPadding=0, bottomPadding=0, leftPadding=0, rightPadding=0,
         )
         plantillas = [PageTemplate(id="resumen", frames=[frame_resumen], onPage=_on_resumen)]
-        for i, s in enumerate(servidores_con_fallas):
+        for i, s in enumerate(servidores_con_detalle):
             frame_detalle = Frame(
-                MARGEN_PT, MARGEN_PT + ALTO_PIE_PT, ANCHO_CONTENIDO_PT, frame_alto_detalle,
+                MARGEN_PT, MARGEN_PT + alto_pie_detalle, ANCHO_CONTENIDO_PT, frame_alto_detalle,
                 id=f"f_detalle_{i}", topPadding=0, bottomPadding=0, leftPadding=0, rightPadding=0,
             )
             plantillas.append(
@@ -496,11 +632,14 @@ def construir_pdf(cliente: str, fecha: date, servidores: list[ResumenServidor], 
 
     def _armar_story() -> list:
         story = [_tabla_resumen_servidores(cliente, servidores)]
-        for i, s in enumerate(servidores_con_fallas):
+        for i, s in enumerate(servidores_con_detalle):
             story.append(NextPageTemplate(f"detalle_{i}"))
             story.append(PageBreak())
-            story.append(_tabla_fallas_servidor(s))
+            story.append(_tabla_vision_stream(s))
             story.append(Spacer(1, 10))
+            if s.fallas:
+                story.append(_tabla_fallas_servidor(s))
+                story.append(Spacer(1, 10))
         return story
 
     doc = _nuevo_doc()

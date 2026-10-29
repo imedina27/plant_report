@@ -7,8 +7,29 @@ siendo la fuente de verdad del proyecto.
 
 ## 2026-10-28
 
+### Documentado
+
+- `diagramas/05-modulo-reporte.md`: revisión a fondo de `reporte/datos_reporte.py` y
+  `reporte/reporte_ejecutivo.py`. Confirmado (no solo recordado): el PDF no muestra incidencias de
+  configuración ni de salud del servicio de IA, y tampoco un cambio de resolución de imagen
+  (`RESOLUCION DISTINTA`) -- ninguno de los 3 mueve ni queda reflejado en `estado_actual`.
+
 ### Corregido
 
+- PDF del reporte: el pie de página de la simbología partía etiquetas de varias palabras a la mitad
+  cuando no cabían en una línea (ej. "Base de" / "imágenes desactualizada" en líneas separadas) --
+  los espacios duros/normales estaban invertidos. Ahora cada entrada completa no se parte, y el
+  salto de línea solo puede caer entre entradas distintas.
+- PDF del reporte: más espacio entre entradas de la simbología del pie (en las dos hojas) -- el
+  cuadro de color de una entrada quedaba pegado al texto de la anterior, confuso para saber cuál
+  iba con cuál.
+- PDF del reporte: cuando una tabla se cortaba entre 2 hojas (ej. una lista larga de "Cámaras con
+  Falla"), el borde externo grueso desaparecía justo en el corte -- el pedazo de arriba se quedaba
+  sin borde inferior, y el de abajo sin borde superior. Primer intento (usar solo las palabras
+  clave de ReportLab `"splitfirst"`/`"splitlast"`) causó una regresión: el borde desaparecía de
+  forma inconsistente en tablas que nunca se cortan (esas palabras clave solo se resuelven cuando
+  la tabla sí se corta). Arreglo final: usar los índices literales y `"splitfirst"`/`"splitlast"`
+  a la vez en `_estilo_base_tabla()`.
 - `scripts/revisar_bases.py`: un `--client`/`--plant`/`--server` con mayúsculas distintas a las
   reales (ej. `AbINBEV` en vez de `AbInBev`) creaba una cámara duplicada en la base de datos en vez
   de tocar la real -- Windows no distingue mayúsculas en archivos, pero Postgres sí. Ahora se
@@ -31,9 +52,38 @@ siendo la fuente de verdad del proyecto.
   de configuración, separada de la de imagen -- no se vuelve a preguntar hasta que se resuelva).
   Nuevas columnas `perfil_camara.config_estado_actual`/`config_incidencia_desde` y
   `historial_comparacion.config_veredicto_humano` (`migrations/0010_config_incidencia.sql`).
+- PDF del reporte, cuerpo de la sección de cámaras por servidor (paso 3): nueva tabla "Sistema de
+  Visión-Stream" -- muestra el o los puertos de IA de ese servidor, coloreados según su estado ese
+  día (verde `ok` / rojo `caido`). Un servidor con Vision-Stream caído ahora recibe su propia hoja
+  de detalle aunque todas sus cámaras estén bien.
 
 ### Cambiado
 
+- PDF del reporte, hoja de resumen de servidores (`reporte/reporte_ejecutivo.py`, paso 1 de la
+  reestructuración pedida): las columnas de conteo de cámaras ya no cambian de color -- siempre
+  negro. El pie de página de esta hoja ahora tiene su propia simbología de 4 colores (OK / Cerca
+  del umbral / Requiere revisión inmediata / Sin datos de monitoreo), sin mezclar los significados
+  de la sección de cámaras por servidor (que se define en un paso siguiente).
+- PDF del reporte, hojas de detalle por servidor (paso 2): su pie de página ahora también trae una
+  línea de simbología (los 6 colores que antes solo vivían en la hoja de resumen). El alto del
+  marco de estas hojas ya no es una constante fija, se mide igual que en la hoja de resumen.
+- PDF del reporte, tabla "Cámaras con Falla" (paso 4): orden fijo de 11 categorías acordado con el
+  usuario; "Imagen IA"/"Imagen cámara" pasan de una etiqueta roja compartida a 2 etiquetas ámbar
+  separadas; se quita el código de error final de todos los motivos (`_sin_codigo_error()`); nuevas
+  categorías "Cambió la configuración" (2 paneles de texto, igual que en la ventana de revisión) y
+  "Cambio de resolución" (motivo con las dimensiones reales, `Base: W x H | Hoy: W x H`). Imagen y
+  configuración ahora son ejes independientes -- una cámara puede aparecer con las 2 fallas el mismo
+  día; el conteo de "Cámaras con falla"/"Cámaras OK" del resumen se ajustó para que los totales
+  sigan cerrando en ese caso.
+- PDF del reporte: los recuadros de imágenes ("Base"/"Actual") y de configuración ("Configuración
+  Base"/"Configuración Hoy") ya no quedan pegados al margen de la página -- ahora tienen el mismo
+  espacio a los lados que el que hay entre ellos.
+- PDF del reporte: ese espacio (márgenes y centro) se redujo a la mitad (10pt → 5pt) y ahora también
+  está arriba y abajo del recuadro, no solo a los lados -- simétrico en las 4 direcciones.
+- PDF del reporte: las tablas "Resumen de Servidores", "Sistema de Visión-Stream" y "Cámaras con
+  Falla" ahora tienen el mismo borde externo grueso que ya tenía el encabezado.
+- PDF del reporte: la fila de títulos de columna de esas 3 tablas ahora se rellena de gris (igual
+  que las etiquetas del encabezado) en vez de confundirse con el rayado de las filas de datos.
 - `compare_camera_image()` ya no guarda la foto de hoy al historial de imágenes por su cuenta --
   ahora `main.py` lo hace explícitamente, después de conocer el veredicto humano (si lo hay), y lo
   omite para cualquier veredicto distinto de "Bien" (`Mal`, `Base Desactualizada`, `Obstruida`) --

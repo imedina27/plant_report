@@ -48,7 +48,7 @@ def main() -> None:
     fecha = FECHA_INICIO
     while fecha <= FECHA_FIN:
         date_str = f"{fecha:%d%m%y}"
-        camaras, logs_por_servidor, _servicios_ia_por_servidor = _camaras_del_dia(date_str)
+        camaras, logs_por_servidor, servicios_ia_por_servidor = _camaras_del_dia(date_str)
         if not camaras:
             fecha += timedelta(days=1)
             continue
@@ -141,6 +141,12 @@ def main() -> None:
                 1 for f in filas if f["estado_actual"] == "amarillo" and f["log_estado"] != "ERROR"
             )
             temperaturas = temperaturas_promedio_dia(servidor, fecha)
+            # Del mismo .log ya parseado arriba, no de la base de datos -- sigue sin tocar nada
+            # real (ROADMAP.md, 28/10/2026).
+            vision_stream = [
+                (s["puerto"], s["estado"])
+                for s in servicios_ia_por_servidor.get((cliente, planta, servidor), [])
+            ]
             resumen = ResumenServidor(
                 nombre=servidor, planta=planta,
                 cpu=temperaturas["cpu"] if temperaturas else None,
@@ -148,6 +154,7 @@ def main() -> None:
                 discos=uso_disco_actual(servidor),
                 camaras_totales=len(filas), camaras_ok=camaras_ok,
                 camaras_no_concluyentes=camaras_no_concluyentes, fallas=fallas,
+                vision_stream=vision_stream,
             )
             por_cliente.setdefault(cliente, []).append(resumen)
             total_camaras_dia += len(filas)

@@ -2613,12 +2613,214 @@ paso acordado: entender bien cómo está hecha la v1 actual antes de decidir qu�
   - **Pendiente, explícitamente para después**: mostrar las incidencias de configuración en el PDF
     -- se hace junto con la Fase 2 de salud del servicio de IA y la revisión del módulo de reporte.
 
-- **Siguiente paso**: revisar a fondo el módulo del reporte ejecutivo en PDF --
-  `reporte/datos_reporte.py` (arma los datos desde la base de datos) y
-  `reporte/reporte_ejecutivo.py` (construye el PDF en sí, sin tocar ninguna base de datos). Mismo
-  tratamiento que los módulos anteriores: diagrama de flujo en `diagramas/` primero, y de ahí decidir
-  cómo encaja la Fase 2 de salud del servicio de IA y las incidencias de configuración (arriba),
-  usando una tabla simple de reglas (pedido del usuario), además de cualquier otro ajuste que surja
-  de revisarlo con calma (ej. cómo se ve la escalada de `base_desactualizada` a los 3 días).
-  Sigue pendiente -- las sesiones del 27/10/2026 se fueron en el arreglo de la base "fantasma" y en
-  la Fase 1 de salud del servicio de IA, ambas de arriba.
+- **Revisión a fondo del módulo de reporte, `diagramas/05-modulo-reporte.md` (28/10/2026)**. Mismo
+  tratamiento que los módulos anteriores -- leído línea por línea `reporte/datos_reporte.py` y
+  `reporte/reporte_ejecutivo.py`, documentado con diagramas de flujo (flujo de
+  `generar_reportes_del_dia()`, árbol de decisión completo de `_clasificar_falla()`, construcción
+  del PDF con doble `build()` para poder numerar "Hoja N de TOTAL").
+  - **Confirmado leyendo el código, no solo recordado de memoria**: `_clasificar_falla()` y
+    `_resumen_servidor()` solo miran `estado_actual` (el semáforo de **imagen**) y `log_estado` --
+    cero referencias a `config_status`/`config_veredicto_humano`/`config_estado_actual` ni a
+    `servicio_ia`/`historial_servicio_ia` en todo el módulo. Confirma exactamente lo que se sabía
+    desde el 27-28/10: ninguna de las dos incidencias nuevas sale en el PDF todavía.
+  - **Hallazgo nuevo de esta revisión**: `imagen_status = 'RESOLUCION DISTINTA'` tampoco es uno de
+    los estados que `_clasificar_falla()` reconoce, y como `db._siguiente_estado()` no cambia
+    `estado_actual` en ese caso (lo deja "igual que estaba"), ni siquiera queda una señal
+    persistente que el reporte pudiera consultar después -- un cambio de resolución real (visto el
+    28/10 en `AD1r1`) es invisible de principio a fin salvo que alguien consulte la base de datos
+    directo, como se hizo entonces.
+  - **Cruce con un bug ya resuelto aquí**: `_resolver_cliente()` (22/10/2026) ya resuelve el mismo
+    problema de mayúsculas/minúsculas que encontramos el 28/10 en `scripts/revisar_bases.py`
+    (`--client ABINBEV` sin normalizar) -- aquí con `LOWER()` en la consulta SQL en vez de validar
+    contra una lista de combinaciones reales, pero la misma idea. Vale la pena recordar este patrón
+    para la próxima vez que algo reciba un nombre de cliente/planta/servidor desde fuera.
+  - **Siguiente paso**: con los 3 huecos ya confirmados con precisión (configuración, servicio de
+    IA, resolución distinta), diseñar la tabla de reglas de qué sale en el PDF y cómo (pedido del
+    usuario) -- pendiente de comentarlo con calma antes de tocar código.
+
+- **Reestructuración del PDF, paso a paso (28/10/2026)**. El usuario decidió abordar el rediseño del
+  reporte dividiéndolo primero en sus 2 secciones grandes (Servidores / Cámaras por servidor), cada
+  una en 3 partes (Encabezado / Cuerpo / Pie de página), y confirmando una por una en vez de
+  rediseñar todo de un jalón.
+  - **Paso 1 completado -- Sección de Servidores (hoja 1, `_tabla_resumen_servidores`)**:
+    - Encabezado y estructura del cuerpo: sin cambios, confirmados como correctos.
+    - Las 4 columnas de conteo de cámaras (`Cámaras totales`/`OK`/`No concluyente`/`Cámaras con
+      falla`) ahora van siempre en negro -- antes 3 de las 4 cambiaban de color (verde/ámbar/rojo)
+      según el conteo, lo cual se confundía con la simbología del pie (que es sobre CPU/GPU/Disco,
+      no sobre cámaras). El detalle de qué cámara tiene qué problema vive en la sección siguiente,
+      no hace falta repetirlo aquí con color.
+    - Pie de página: la simbología de 6 colores (verde/ámbar/rojo/morado/azul/gris) mezclaba los
+      significados de las dos secciones -- morado ("Pendiente de revisión") y azul ("Base de
+      imágenes desactualizada") no se usan para nada en esta hoja. Nueva `_SIMBOLOGIA_RESUMEN` (4
+      colores, solo lo que aparece aquí): verde "OK", ámbar "Cerca del umbral", rojo "Requiere
+      revisión inmediata", gris "Sin datos de monitoreo". La simbología original de 6 se conservó
+      como `_SIMBOLOGIA_DETALLE` -- pedido explícito del usuario, se reutilizará para el pie de la
+      sección de cámaras por servidor cuando se defina ese paso. `_texto_simbologia()` ahora recibe
+      la lista a dibujar en vez de tener una sola fija.
+    - Probado generando el PDF de muestra (`scripts/mock_reporte_ejecutivo.py`) y renderizando la
+      hoja 1 a imagen para revisarla visualmente (PyMuPDF instalado solo para esta verificación y
+      desinstalado después -- no es una dependencia del proyecto): columnas de cámaras en negro,
+      CPU/GPU/Disco con su color normal, pie con las 4 entradas nuevas, confirmado visualmente.
+  - **Paso 2 completado -- Sección de Cámaras por servidor, encabezado y pie**:
+    - Encabezado (`_tabla_encabezado_detalle`): sin cambios, confirmado como correcto.
+    - Pie de página: ahora reutiliza `_SIMBOLOGIA_DETALLE` (los 6 colores originales, que antes
+      vivían solo en la hoja de resumen) -- pedido explícito del usuario. `_tabla_pie()` (antes
+      plana, sin simbología) y `_tabla_pie_resumen()` se fusionaron en una sola función
+      parametrizada por qué simbología dibujar, para no duplicar la tabla del pie entre las dos
+      secciones. El alto del marco de las hojas de detalle, antes una constante fija
+      (`ALTO_PIE_PT = 20`, ahora eliminada por no usarse más), pasó a medirse dinámicamente igual
+      que ya se hacía para la hoja de resumen -- la simbología de 6 colores es más alta que el pie
+      plano de antes.
+    - **Bug encontrado por el usuario al revisar el PDF generado**: la simbología se armaba con
+      espacios normales (partibles) *dentro* de cada etiqueta de varias palabras, y espacios duros
+      (`&nbsp;`, no partibles) *entre* etiquetas -- exactamente al revés de lo que hacía falta. Con
+      poco espacio, "Base de imágenes desactualizada" se partía a la mitad ("Base de" en una línea,
+      "imágenes desactualizada" en la siguiente) en vez de bajar completa. Corregido invirtiendo
+      cuál es duro y cuál no: cada entrada completa (bala + etiqueta) ahora es una sola unidad que
+      no se puede partir, y el espacio normal queda solo como separador entre entradas -- ahí sí
+      puede saltar de línea.
+    - Probado regenerando el PDF de muestra y renderizando la hoja de detalle a imagen -- la
+      corrección del salto de línea confirmada visualmente antes y después.
+    - **Ajuste de espaciado (mismo día)**: el usuario notó que el cuadro de color de una entrada
+      quedaba pegado al texto de la entrada anterior ("OK" muy cerca del cuadro ámbar siguiente),
+      confuso para saber cuál texto describe cuál color -- en las dos hojas (resumen y detalle).
+      Separador entre entradas: de 4 espacios normales a 6 espacios duros + 1 normal (el normal es
+      el único punto donde se permite el salto de línea entre entradas). Probado visualmente en
+      ambas hojas.
+  - **Paso 3 completado -- cuerpo de la sección de Cámaras por servidor, tabla nueva "Sistema de
+    Visión-Stream"**. Antes de diseñar, se confirmó con el usuario que **sí tenemos la IP de cada
+    cámara** (`historial_comparacion.log_ip`) pero **no la IP del servidor en sí** -- el `.log` solo
+    trae la etiqueta `"Local IP"`/`"Zerotier IP"` sin ningún valor numérico debajo, nunca se parseó.
+    - **Diseño confirmado**: tabla de 2 columnas, "Servicios en [servidor]" / "Puerto(s)
+      Utilizado(s)", una sola fila por ahora ("Vision-Stream" -- el nombre con el que se conoce el
+      servicio de IA). Todos los puertos conocidos de ese servidor van en una sola celda, cada uno
+      coloreado individualmente (verde `ok` / rojo `caido` -- confirmado que `servicio_ia.
+      estado_actual` solo tiene esos 2 valores posibles, sin estado intermedio). Un servidor sin
+      ningún puerto conocido muestra "Puerto Desconocido" (caso excepcional, prácticamente resuelto
+      por el arreglo del log del 27/10, pero no se descarta).
+    - **Cambio de comportamiento real, no solo cosmético**: un servidor ahora recibe su propia hoja
+      de detalle si tiene cámaras con falla **o** si su Vision-Stream tiene al menos un puerto
+      `caido` ese día -- antes solo entraba por cámaras con falla. Si solo tiene el problema de
+      Vision-Stream, la hoja muestra esa tabla sola, sin la de "Cámaras con Falla".
+    - Sobre el motivo de la falla (ej. `[411]`/`[410]`): se confirmó que hay más de un texto posible
+      (vistos ambos con datos reales: `Pemex/DEMOQUA` con `[411] Read timeout`, `C5i_Colima/COLIMA01`
+      con `[410] Connection error`), pero los dos significan lo mismo en la práctica -- se decidió
+      no agregar una tercera columna de "Motivo" aquí, el color basta. El texto crudo sigue
+      disponible en `historial_servicio_ia.motivo` para quien necesite el detalle exacto.
+    - `reporte/reporte_ejecutivo.py`: `ResumenServidor` gana el campo `vision_stream:
+      list[tuple[int, str]]`; nueva `_tabla_vision_stream()`. `servidores_con_fallas` se renombró a
+      `servidores_con_detalle` en todo `construir_pdf()`, ya que el nombre viejo dejó de describir
+      el criterio real.
+    - `reporte/datos_reporte.py`: nueva `_vision_stream_servidor()`, consulta `historial_servicio_ia`
+      JOIN `servicio_ia` por la fecha exacta del reporte (no el estado "actual" en vivo).
+    - `scripts/backfill_reportes.py`: conectado también, reusando `servicios_ia_por_servidor` que
+      `_camaras_del_dia()` ya regresaba sin que nadie lo consumiera desde la Fase 1 (27/10/2026) --
+      sale del mismo `.log` ya parseado, no de la base de datos, consistente con que este script
+      nunca toca nada real.
+    - `scripts/mock_reporte_ejecutivo.py`: datos de los 4 escenarios (puerto sano, multipuerto con
+      uno caído, puerto desconocido, y un servidor con cámaras 100% bien pero Vision-Stream caído)
+      para poder probar todo visualmente.
+    - Probado generando el PDF de muestra y renderizando las 4 hojas a imagen: confirmado que el
+      servidor sin fallas de cámara pero con Vision-Stream caído genera su hoja mostrando solo esa
+      tabla; el multipuerto marca el color de cada uno por separado; "Puerto Desconocido" se ve bien.
+  - **Paso 4 completado -- orden y formato de la tabla "Cámaras con Falla"**. Se armó el inventario
+    completo de estados posibles antes de definir el orden (leyendo `_clasificar_falla()` con
+    cuidado) -- 9 categorías ya existentes más 2 huecos reales (incidencia de configuración, ya
+    construida antes; resolución distinta, que no se mostraba en ningún lado). El usuario fue dando
+    el orden en varias rondas, con una corrección importante en el camino.
+    - **Error desconocido, aclarado**: no es una categoría propia -- es el resultado de "ninguna de
+      las anteriores" dentro de la misma decisión que separa Puerto 80/Imagen IA/Imagen cámara/
+      Configuración (todas vienen de una sola llamada a `_etiqueta_sin_respuesta()`), nunca se vio
+      en ningún dato real de esta sesión. Va al final de ese grupo, como último recurso.
+    - **Resolución distinta NO es lo mismo que "cambió la configuración"**, aunque sonaban
+      relacionados -- se verificó con el caso real (`AD1r1`, 28/10): ese día `imagen_status =
+      'RESOLUCION DISTINTA'` pero `config_status = 'OK'` con cero diferencias -- son 2 comparaciones
+      completamente independientes (dimensiones del `.jpg` vs. campos del `.json`), y una base de
+      imagen reemplazada por error con una de otra resolución (causa real que reportó el usuario) no
+      necesariamente deja ningún rastro en la configuración. Quedó como categoría propia (orden 11,
+      justo debajo de "Cambió la configuración"), con el motivo mostrando las dimensiones reales:
+      `"Base: wwww x hhhh | Hoy: wwww x hhhh"` -- ahora construido directo en
+      `comparacion.image_compare.evaluar_par()`, no inventado en el reporte.
+    - **Orden final acordado** (1 a 11): Cámara sin respuesta (Puerto 80) -- Imagen IA no disponible
+      -- Imagen de cámara no disponible -- Configuración no disponible -- Error desconocido --
+      Cámara movida (confirmado) -- Pendiente de revisión -- Base de imágenes desactualizada --
+      Base de imágenes desactualizada (N días) -- Cambió la configuración -- Cambio de resolución.
+      "Imagen IA"/"Imagen cámara" pasaron de una sola etiqueta compartida ("Imagen no disponible",
+      rojo) a dos etiquetas distintas en ámbar (pedido del usuario: "no es un fallo catastrófico",
+      el puerto 80 sí respondió, solo falló un paso downstream).
+    - **El código de error final se quita de todos los motivos que se le muestran al cliente** (ej.
+      `"Puerto 80 Timed out [111]"` → `"Puerto 80 Timed out"`) -- nueva `_sin_codigo_error()`. El
+      dato completo se queda igual en la base de datos, esto es solo cómo se ve en el PDF.
+    - **Cambio estructural importante**: imagen y configuración son ejes independientes -- una misma
+      cámara puede tener las 2 fallas el mismo día (ej. se movió *y* le cambiaron la configuración).
+      `_clasificar_falla()` ahora regresa una **lista** de `(orden, CamaraFalla)` en vez de una sola
+      -- se aplanan todas las cámaras de un servidor y se ordenan globalmente por `(orden, camara)`.
+    - **Efecto colateral que había que corregir para que los totales no se rompieran**: con una
+      cámara pudiendo aparecer 2 veces en `fallas`, `len(fallas)` ya no servía ni para contar
+      "cámaras con falla" en el resumen (ahora cuenta cámaras **distintas**) ni para decidir
+      `camaras_ok`/`camaras_no_concluyentes` (ahora excluyen explícitamente cualquier cámara que
+      tenga una falla por cualquier eje) -- sin esto, la suma dejaba de cerrar contra
+      "Cámaras totales" apenas una cámara tuviera 2 fallas a la vez.
+    - **"Cambió la configuración" se muestra igual que en la ventana** (`pedir_revision_config()`):
+      2 paneles de texto, "Configuración Base"/"Configuración Hoy", agrupados por categoría, solo
+      los campos que cambiaron -- nueva `_fila_config_diff()` en `reporte_ejecutivo.py`, mismo
+      tratamiento visual que `_fila_imagenes()` (span completo, sin fondo de banda).
+    - `reporte/datos_reporte.py`: `_resumen_servidor()` ahora selecciona también `imagen_status`,
+      `config_diferencias` y `perfil_camara.config_estado_actual` en su consulta SQL.
+    - Probado: `_clasificar_falla()` con 11 casos sintéticos (uno por categoría) más un caso de 2
+      fallas en la misma cámara -- orden, etiqueta, color y texto sin código de error, todos
+      correctos. Contra datos reales de hoy (3 servidores de AbInBev): los totales cierran
+      exactamente contra "Cámaras totales" en los 3, y el orden sale bien ordenado de forma natural
+      (sin tener que forzar nada). PDF de muestra regenerado con los 2 tipos nuevos y el caso de
+      doble falla, confirmado visualmente.
+  - **Ajustes visuales pedidos tras ver el PDF de muestra (mismo día)**: "Cámara movida" se probó
+    también con un par de fotos reales (no inventadas) para confirmar que la cuadrícula de ayuda y
+    las etiquetas "Base"/"Actual" se ven bien con contenido real, no solo con texto. Y un detalle
+    estético: los recuadros de imágenes y los paneles de configuración quedaban pegados al margen de
+    la página mientras que entre los dos recuadros sí había separación -- se agregaron columnas de
+    margen del mismo ancho que el espacio entre recuadros, en ambos (`_fila_imagenes()` y
+    `_fila_config_diff()`), probado visualmente en las 2 hojas que los usan.
+  - **Segunda vuelta del mismo ajuste**: el espacio (márgenes + centro) se sentía grande --
+    `_GUTTER_IMAGENES_PT` bajó de 10pt a 5pt, y se agregó el mismo espacio arriba y abajo del
+    recuadro (antes solo estaba a los lados) para que quedara simétrico en las 4 direcciones --
+    `TOPPADDING`/`BOTTOMPADDING` de la fila que contiene `_fila_imagenes()`/`_fila_config_diff()` en
+    `_tabla_fallas_servidor()`, antes heredados del estilo base (3pt, sin relación con el gutter).
+    Probado visualmente en las 2 hojas.
+  - **Borde externo consistente**: el encabezado (`_estilo_encabezado()`) ya tenía un `BOX` grueso
+    (1.75pt) alrededor de toda la tabla, además del `GRID` fino (0.75pt) de las líneas internas --
+    las otras 3 tablas (Resumen de Servidores, Sistema de Visión-Stream, Cámaras con Falla) solo
+    tenían el `GRID`, sin ese marco externo más marcado. Se agregó el mismo `BOX` a
+    `_estilo_base_tabla()` (la función compartida por las 3) para que las 4 tablas del reporte se
+    vean consistentes entre sí. Probado visualmente en las 3 hojas que las usan.
+  - **Bug real encontrado por el usuario: el borde grueso desaparecía al cortarse una tabla entre
+    hojas**. Las tablas largas (ej. "Cámaras con Falla" de un servidor con muchas fallas) se cortan
+    automáticamente entre páginas; con un `BOX` normal, ReportLab solo dibuja el borde de
+    arriba/abajo en la primera/última fila de la tabla **completa** original -- el pedazo de arriba
+    del corte se quedaba sin borde inferior, y el de abajo sin borde superior (confirmado con una
+    prueba mínima aparte antes de tocar el código real). Primer intento (incompleto, ver siguiente
+    punto): reemplazar `(0,0)-(-1,-1)` por las palabras clave propias de ReportLab
+    `"splitfirst"`/`"splitlast"` en `LINEABOVE`/`LINEBELOW`.
+  - **Regresión encontrada por el usuario tras el primer intento**: con solo `"splitfirst"`/
+    `"splitlast"`, el borde grueso desapareció de forma inconsistente -- algunas tablas sin borde
+    arriba y abajo, otras solo sin abajo, otras solo sin arriba. Causa raíz (confirmada leyendo el
+    código fuente de ReportLab, `tables.py`, función `_drawLines`): esas palabras clave **solo se
+    resuelven cuando la tabla realmente se corta entre hojas** -- en el dibujo normal de una tabla
+    que cabe completa en una página, ReportLab las ignora por completo (línea de código: `if
+    isinstance(sr,strTypes) and sr in _SPECIALROWS: continue`). Por eso la tabla corta de
+    "Sistema de Visión-Stream" (3 filas, nunca se corta) se quedaba sin borde del todo. **Arreglo
+    correcto**: usar los dos a la vez en `_estilo_base_tabla()` -- los comandos literales
+    `(0,0)-(-1,0)`/`(0,-1)-(-1,-1)` (para cuando la tabla no se corta) **y** los simbólicos
+    `"splitfirst"`/`"splitlast"` (para cuando sí se corta, en el punto de corte real). No son
+    intercambiables, hacen falta ambos. Las líneas izquierda/derecha (`LINEBEFORE`/`LINEAFTER`) no
+    tenían este problema -- ya se aplicaban correctamente por fila con índices literales. El
+    encabezado no se tocó (nunca se corta entre hojas, no le aplica el bug). Probado con una tabla
+    sintética (3 filas sin cortar + 40 filas que sí se cortan) antes del arreglo final (bordes
+    faltantes o inconsistentes, confirmado) y después (cerrados en ambos casos), y luego contra el
+    PDF de muestra real completo (5 hojas: resumen, Visión-Stream corta sin dividir, y "Cámaras con
+    Falla" dividida entre 2 hojas) -- las 3 tablas con borde completo en todos los casos.
+  - **Títulos de columna en gris**: la fila de títulos (`Servidor`/`CPU`/..., `Cámara`/`Estado`/
+    `Motivo`, `Servicios en.../Puerto(s)...`) cambió del rayado blanco/franja normal de las filas de
+    datos (donde caía por casualidad, al ser la fila 1) a un relleno gris fijo (`ETIQUETA_FONDO`),
+    igual que las etiquetas del encabezado -- pedido del usuario. El rayado alternado de las filas de
+    datos reales se conservó exactamente igual (empieza en la fila 2 ahora, en vez de incluir por
+    error la fila de títulos). Probado visualmente en las 3 hojas.
