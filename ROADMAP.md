@@ -2824,3 +2824,116 @@ paso acordado: entender bien cómo está hecha la v1 actual antes de decidir qu�
     igual que las etiquetas del encabezado -- pedido del usuario. El rayado alternado de las filas de
     datos reales se conservó exactamente igual (empieza en la fila 2 ahora, en vez de incluir por
     error la fila de títulos). Probado visualmente en las 3 hojas.
+  - **Verificación final contra producción real (29/10/2026)**, antes de dar luz verde a la corrida
+    del día: en vez de esperar al backfill completo (se quedó corriendo toda la noche y no alcanzó a
+    terminar, llegó solo hasta el 21/10 de los 28 días que le tocaban -- quedó descartado para esto),
+    se llamó directo a `datos_reporte.generar_reportes_del_dia()` contra la base de datos de
+    producción (solo lectura) para el 28/10/2026 ya procesado, redirigiendo la salida a una carpeta
+    de prueba en vez de `REPORTES_ROOT`. Confirmado con datos 100% reales: AbInBev (12 hojas, 11
+    servidores) y Api_Manzanillo (3 hojas, con una tabla "Cámaras con Falla" que sí se corta entre
+    hojas de verdad) -- los totales cierran exactamente en los 11 servidores, el borde grueso se ve
+    completo en todos los casos incluido el corte real, Vision-Stream se ve bien con 1 y con 4
+    puertos reales, y un caso real de "Cámara movida" (cámara `EL`) se ve bien con sus fotos.
+    **2 observaciones, no son bugs de hoy**: (1) el motivo de "Cámara movida (confirmado)" a veces
+    muestra texto técnico interno sin pulir (ej. "ningun metodo alcanza suficiente confianza") --
+    es el `imagen_motivo` que se recalcula todos los días aunque el semáforo ya esté en rojo, pendiente
+    de que el usuario decida si vale la pena pulirlo; (2) una fila mostró el texto viejo "resoluciones
+    distintas" de antes del fix de hoy a `image_compare.py` -- esperado, es una fila ya escrita con el
+    código viejo, no se reescribe historial.
+
+- **Bug real en producción: `_orb_ransac` tronaba con exactamente 1 inlier (29/10/2026)**. El usuario
+  corrió el reporte real del día y `main.py` truncó a media corrida
+  (`AbInBev/ZACATECAS/QLYMSPROD02/C2p`, confirmado reproduciendo con las imágenes reales de hoy).
+  `cv2.estimateAffinePartial2D` (dentro de `_descomponer_transformacion`, agregada 26/10/2026) exige
+  mínimo 2 puntos para resolver traslación+rotación+escala (4 incógnitas) -- la validación previa en
+  `_orb_ransac()` solo cubría 0 inliers (`if inlier_mask.sum() == 0`), así que el caso de exactamente
+  1 inlier se colaba y tronaba. Corregido cambiando la condición a `< 2`. Verificado reproduciendo el
+  crash exacto con las imágenes reales que lo causaron (confirmado: antes del fix, 1 inlier, hubiera
+  tronado igual) y barriendo el resto de cámaras del mismo servidor -- ninguna otra tenía el mismo
+  caso, corrida completa sin tronar con el fix.
+
+- **Columna "Motivo" del PDF traducida a lenguaje ejecutivo (29/10/2026)**. El usuario (ingeniero de
+  infraestructura) le mandó el reporte a un gerente de planta, que entendió muy poco de la columna
+  "Motivo" -- es texto técnico crudo (jerga de red tipo "Puerto 80 Timed out [111]", nombres de
+  método ORB/fase, rutas de campo de configuración tipo `ImageChannel.WhiteBalance...`). Antes de
+  tocar nada se armó un catálogo completo de todos los textos de "Motivo" posibles (10 categorías,
+  una por cada rama de `_clasificar_falla()`) y se confirmó con el usuario que **la base de datos
+  sigue guardando el texto crudo completo sin cambios** -- soporte sigue entrando a
+  `historial_comparacion.log_motivo`/`imagen_motivo`/`config_diferencias` y viendo exactamente qué
+  pasó, con el código de error incluido. Lo único que cambia es lo que se **imprime en el PDF**.
+  - Propuesta de traducción (tabla motivo técnico → frase amigable) discutida y confirmada con el
+    usuario antes de implementar (regla del proyecto: cambio de diseño/comportamiento del reporte
+    requiere confirmación previa).
+  - `_etiqueta_sin_respuesta()` (datos_reporte.py) ahora regresa también el `motivo` amigable --
+    frase fija por categoría (ya no distingue "Timed out" de "Connection refused"/"Unknow error
+    [790]", ese detalle de red solo le servía a soporte). Se quita `_sin_codigo_error()` (quedó sin
+    uso: ya no se expone el texto crudo en el PDF, así que no hace falta recortarle el código de
+    error).
+  - "Cámara movida (confirmado)"/"Pendiente de revisión"/"Base de imágenes desactualizada" pasan a
+    una frase fija por estado (ignorando las 5 variantes técnicas de `image_compare.py`, ej. "solo
+    ORB confiable" vs "solo fase confiable" -- ruido para un no-técnico).
+  - "Cambio de resolución": nueva `_motivo_resolucion_distinta()` reformatea
+    `"Base: W x H | Hoy: W x H"` a `"La resolución de la imagen cambió (antes W×H, ahora W×H)"`.
+    **Bug real encontrado al verificar contra datos reales**: una fila del 28/10/2026 (`AD1r1`)
+    trae el texto viejo `"resoluciones distintas"` (de antes del fix del mismo día a
+    `image_compare.py`) -- sin manejarlo, el regex-match truena. Corregido con un fallback: si no
+    calza el formato nuevo, se muestra el texto tal cual en vez de tronar. Un reporte de una fecha
+    vieja puede volver a generarse y toparse con este tipo de fila histórica.
+  - "Cambió la configuración": antes mostraba el "Motivo" vacío (el detalle vivía solo en el panel
+    de campos de abajo). Nueva `_motivo_config_cambio()` arma un resumen de una línea por categoría
+    (`"Cambiaron ajustes de Imagen, Red en la cámara"`) usando las 4 categorías ya definidas en
+    `config_compare.py` (imagen/video/compresión/network → Imagen/Video/Compresión/Red). El panel
+    de detalle campo por campo (`_fila_config_diff`) no cambia -- sigue mostrando el valor base y
+    actual de cada campo tal cual, eso no se tocó.
+  - `scripts/mock_reporte_ejecutivo.py` actualizado -- construye los `CamaraFalla` a mano (no pasa
+    por `_clasificar_falla()`) y se había quedado con los motivos técnicos viejos; ahora usa las
+    mismas frases amigables para que el PDF de muestra siga representando el comportamiento real.
+  - `scripts/backfill_reportes.py` llama a `_clasificar_falla()` real, así que hereda el cambio
+    automático -- sin tocar ese script. **Nota aparte, no relacionada con este cambio**: ese script
+    arma sus filas sin las claves `imagen_status`/`config_estado_actual`/`config_diferencias`, que
+    `_clasificar_falla()` sí espera -- probablemente truena si corre hoy (no se investigó más a
+    fondo, no es parte de este pedido).
+  - Probado: PDF de muestra re-renderizado y revisado visualmente (las 10 categorías, incluida la
+    fila de configuración con su panel de detalle intacto); y contra datos reales de producción
+    generando (solo lectura, sin tocar la BD ni la carpeta real de reportes) los reportes del
+    21/10, 28/10 y 29/10 completos sin errores -- incluyendo el caso del fallback de resolución.
+
+- **Bitácora de observaciones (`observacion_camara`) agregada al PDF (29/10/2026)**. Existía desde el
+  21/10/2026 pero nunca se mostraba en el reporte -- el usuario pidió agregarla, con 2 opciones sobre
+  la mesa (dentro del "Motivo" vs. una fila/columna aparte). Se discutió y se confirmó la primera
+  (más limpio, menos filas/columnas nuevas).
+  - **Primera versión**: todas las observaciones activas (`resuelta_en IS NULL`) debajo del motivo,
+    cada una con la etiqueta `Observación:`. Se encontró en el camino que hoy **nada en este repo
+    cierra una observación** -- `resuelta_en` existe en el esquema desde el 21/10/2026 pero solo
+    `db.crear_observacion()` la usa (para insertar); cerrarla/editarla se decidió dejar, a propósito,
+    para un programa de administración aparte que todavía no existe. Confirmado con `grep`: cero
+    `UPDATE` a `resuelta_en` en todo el repo.
+  - **Pedido de seguimiento, mismo día**: una observación resuelta debe seguir viéndose, tachada,
+    durante 15 días desde que se resuelve -- después desaparece. Antes de implementar se discutieron
+    2 puntos con el usuario:
+    - Alcance: ¿una cámara sana (verde, sin ninguna otra falla) con una observación resuelta
+      reciente debería aparecer en "Cámaras con Falla" solo para mostrar ese rastro? **Decidido:
+      no** -- alcance angosto, la bitácora solo agrega contexto a una fila que ya iba a existir por
+      otra razón. Una cámara sana nunca entra a la tabla por culpa de su bitácora.
+    - Formato exacto (acordado con el usuario): encabezado `Observaciones:` en negrita, una línea por
+      nota con su fecha de creación (`DD/MM/AAAA`), de la más vieja a la más nueva -- las resueltas
+      tachadas (`<strike>`), las activas no.
+  - **Implementado**: `db.observaciones_activas()` (primera versión) se reemplazó por
+    `db.observaciones_para_reporte(conn, camara_ids, fecha, dias_resuelta_visible)` -- una sola
+    consulta por servidor (no una por cámara), trae activas + resueltas dentro de la ventana. La
+    ventana de 15 días (`datos_reporte.DIAS_OBSERVACION_RESUELTA_VISIBLE`) se cuenta contra la
+    **fecha del reporte**, no contra la fecha real en que se corre -- mismo criterio que
+    `dias_sin_resolver` en `_clasificar_falla()` -- para que un reporte de una fecha vieja se vea
+    igual sin importar cuándo se regenere.
+  - `_con_observaciones()` (datos_reporte.py) arma el bloque de texto; se agrega debajo del motivo en
+    **todas** las fallas de esa cámara ese día (son contexto a nivel cámara, no de un eje en
+    particular -- si una cámara tuviera falla de imagen y de configuración el mismo día, ambas filas
+    muestran la misma bitácora).
+  - `scripts/mock_reporte_ejecutivo.py` actualizado con el caso completo (3 observaciones: 1 resuelta
+    y 2 activas, en orden cronológico) para que el PDF de muestra siga representando el formato real.
+  - Probado: visualmente contra el PDF de muestra (coincide exactamente con el formato acordado) y
+    contra datos reales de producción (21/10, 28/10, 29/10, solo lectura) sin errores -- incluyendo
+    el caso real de `E3p` (2 observaciones activas de la auditoría de bases del 27-28/10/2026).
+  - Confirmado con el usuario: este cambio aplica a **cualquier fecha** que se (re)genere, no solo al
+    día de la corrida -- vive en el código, no en los datos. Lo único que varía según la fecha es qué
+    observaciones caen dentro de la ventana de 15 días, no si el formato nuevo aplica.

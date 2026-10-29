@@ -17,6 +17,7 @@ import re
 from comparacion.image_compare import CHECK_PLANTS_ROOT
 from comparacion.image_compare import base_path as ruta_base_imagen
 from integraciones import monit_client
+from persistencia.db import observaciones_para_reporte
 from reporte.reporte_ejecutivo import CamaraFalla, ResumenServidor, construir_pdf
 
 load_dotenv()
@@ -36,18 +37,17 @@ def _rutas_imagenes(
     return (base if base.exists() else None), actual
 
 
-_RE_CODIGO_ERROR = re.compile(r"\s*\[\d+\]\s*$")
+# ---------------------------------------------------------------------------
+# Traducción a lenguaje "ejecutivo" (pedido 29/10/2026, ver ROADMAP.md): un gerente de planta leyó
+# el reporte y no entendió el detalle técnico de la columna "Motivo" (jerga de red, nombres de
+# método ORB/fase, rutas de campo de configuración). Ese texto crudo se queda igual y completo en
+# `historial_comparacion.log_motivo`/`imagen_motivo`/`config_diferencias` -- soporte lo sigue
+# consultando ahí tal cual viene del log para saber exactamente qué pasó. Lo de aquí solo cambia lo
+# que se imprime en el PDF.
+# ---------------------------------------------------------------------------
 
-
-def _sin_codigo_error(texto: str) -> str:
-    """Quita el código de error final del texto crudo del log (ej. `" [111]"`) -- no es información
-    relevante para el cliente que lee el PDF (pedido 28/10/2026). El dato completo se queda igual en
-    `historial_comparacion.log_motivo`/`imagen_motivo`, esto solo afecta cómo se ve en el reporte."""
-    return _RE_CODIGO_ERROR.sub("", texto).strip()
-
-
-def _etiqueta_sin_respuesta(log_motivo: str | None) -> tuple[str, str, int]:
-    """`(etiqueta, color, orden)` según qué paso falló en el `.log` del servidor (ver
+def _etiqueta_sin_respuesta(log_motivo: str | None) -> tuple[str, str, int, str]:
+    """`(etiqueta, color, orden, motivo)` según qué paso falló en el `.log` del servidor (ver
     `log_parse.py`) -- no todos los fallos son igual de graves (pedido 21/10/2026, tras ver `AD1p`
     con "Configuración Unknow error [790]" y `AD1r2` con "Puerto 80 Timed out [111]" mostrando el
     mismo letrero genérico, aunque uno sigue funcionando bien y el otro está totalmente caído):
@@ -61,17 +61,72 @@ def _etiqueta_sin_respuesta(log_motivo: str | None) -> tuple[str, str, int]:
 
     `orden` fija la posición en la tabla "Cámaras con Falla" (ROADMAP.md, 28/10/2026, orden
     acordado con el usuario) -- ver `_ORDEN_*` abajo para el resto de categorías.
+
+    `motivo` es una frase fija por categoría (pedido 29/10/2026) -- ya no distingue "Timed out" de
+    "Connection refused"/"Unknow error [790]", ese detalle de red no le sirve a un gerente de planta.
     """
     texto = log_motivo or ""
     if texto.startswith("Puerto 80"):
-        return "Cámara sin respuesta", "rojo", 1
+        return "Cámara sin respuesta", "rojo", 1, "No se pudo establecer conexión con la cámara"
     if texto.startswith("Imagen IA"):
-        return "Imagen IA no disponible", "ambar", 2
+        return ("Imagen IA no disponible", "ambar", 2,
+                "No se pudo obtener la imagen procesada por el sistema de IA")
     if texto.startswith("Imagen cámara"):
-        return "Imagen de cámara no disponible", "ambar", 3
+        return ("Imagen de cámara no disponible", "ambar", 3,
+                "No se pudo descargar la foto más reciente de la cámara")
     if texto.startswith("Configuración"):
-        return "Configuración no disponible", "ambar", 4
-    return "Error desconocido", "rojo", 5
+        return ("Configuración no disponible", "ambar", 4,
+                "No se pudo leer la configuración actual de la cámara")
+    return "Error desconocido", "rojo", 5, "Ocurrió un error no identificado al conectar con la cámara"
+
+
+_RE_RESOLUCION = re.compile(r"Base: (\d+) x (\d+) \| Hoy: (\d+) x (\d+)")
+
+
+def _motivo_resolucion_distinta(motivo_crudo: str | None) -> str:
+    """Reformatea el `"Base: W x H | Hoy: W x H"` que arma `image_compare.evaluar_par` a una frase
+    más legible para el PDF -- el texto crudo se queda igual en
+    `historial_comparacion.imagen_motivo` (pedido 29/10/2026).
+
+    Si no calza con ese formato se regresa tal cual (caso real confirmado: `AD1r1`, 28/10/2026,
+    todavía con el texto viejo `"resoluciones distintas"`, de antes de que `evaluar_par` empezara a
+    incluir las dimensiones ese mismo día -- un reporte de una fecha vieja puede volver a generarse
+    y toparse con ese registro histórico)."""
+    m = _RE_RESOLUCION.match(motivo_crudo or "")
+    if m is None:
+        return motivo_crudo or "La resolución de la imagen cambió"
+    bw, bh, aw, ah = m.groups()
+    return f"La resolución de la imagen cambió (antes {bw}×{bh}, ahora {aw}×{ah})"
+
+
+_CATEGORIA_AMIGABLE = {"imagen": "Imagen", "video": "Video", "compresion": "Compresión", "network": "Red"}
+
+
+def _motivo_config_cambio(diferencias: list[dict]) -> str:
+    """Resumen de una línea para la columna "Motivo" (pedido 29/10/2026) -- el detalle campo por
+    campo (valores base/actual) se sigue viendo igual que antes en el panel de `_fila_config_diff`
+    (reporte_ejecutivo.py), esto solo deja de mostrarla vacía."""
+    categorias_presentes = {d["categoria"] for d in diferencias}
+    etiquetas = [v for k, v in _CATEGORIA_AMIGABLE.items() if k in categorias_presentes]
+    return f"Cambiaron ajustes de {', '.join(etiquetas)} en la cámara"
+
+
+def _con_observaciones(motivo: str, observaciones: list[dict]) -> str:
+    """Agrega debajo del motivo las observaciones de la bitácora de la cámara (`observacion_camara`,
+    pedido 29/10/2026) -- dentro de la misma celda en vez de una columna o fila aparte (acordado con
+    el usuario: más limpio). Si no hay ninguna, el motivo no cambia.
+
+    Formato acordado con el usuario: encabezado "Observaciones:" en negrita, una línea por nota con
+    su fecha de creación, de la más vieja a la más nueva (`observaciones` ya viene en ese orden, ver
+    `persistencia.db.observaciones_para_reporte`) -- las resueltas se tachan, las activas no."""
+    if not observaciones:
+        return motivo
+    lineas = []
+    for obs in observaciones:
+        texto = f"<strike>{obs['texto']}</strike>" if obs["resuelta"] else obs["texto"]
+        lineas.append(f"{obs['creado_en']:%d/%m/%Y}: {texto}")
+    bloque = "<br/>".join(lineas)
+    return f"{motivo}<br/><br/><b>Observaciones:</b><br/>{bloque}"
 
 
 # Orden de aparición en "Cámaras con Falla" (ROADMAP.md, 28/10/2026) -- 1-5 vienen de
@@ -84,6 +139,7 @@ _ORDEN_CONFIG_CAMBIO = 10
 _ORDEN_RESOLUCION_DISTINTA = 11
 
 DIAS_BASE_DESACTUALIZADA_URGENTE = 3  # ver _clasificar_falla
+DIAS_OBSERVACION_RESUELTA_VISIBLE = 15  # ver _con_observaciones / db.observaciones_para_reporte
 
 
 def _clasificar_falla(
@@ -102,26 +158,43 @@ def _clasificar_falla(
     primero que se encuentre. Si no respondió nada ese día (`log_estado == 'ERROR'`), no hay nada
     más que comparar -- se regresa de inmediato sin revisar los demás ejes.
 
-    "Estado" muestra una etiqueta descriptiva (no el color crudo) y "Motivo" el detalle técnico, sin
-    el código de error final (pedido 28/10/2026, ver `_sin_codigo_error`). Las cámaras sin respuesta
-    no traen imágenes (no hay "actual" que capturar ese día); las demás sí, incluida base
+    "Estado" muestra una etiqueta descriptiva (no el color crudo) y "Motivo" una frase amigable para
+    quien no conoce el detalle técnico (pedido 29/10/2026, ver `_etiqueta_sin_respuesta` y
+    `_motivo_*` arriba) -- el texto técnico completo (con código de error incluido) se sigue
+    guardando igual en la base de datos, esto solo cambia cómo se ve en el reporte. Las cámaras sin
+    respuesta no traen imágenes (no hay "actual" que capturar ese día); las demás sí, incluida base
     desactualizada (ayuda a ver de un vistazo si de verdad hace falta reemplazarla).
+
+    Las observaciones de la cámara (`fila["observaciones"]`, ver `_resumen_servidor` -- opcional,
+    `.get()` con `[]` por defecto para no exigirle la llave a `backfill_reportes.py`) se agregan
+    debajo del motivo en **todas** las fallas de esa cámara ese día (pedido 29/10/2026): son contexto
+    a nivel cámara, no de un eje en particular, así que aplican igual a la fila de imagen que a la de
+    configuración si la cámara tuviera las dos el mismo día. Alcance angosto acordado con el usuario:
+    esto nunca mete por sí solo a una cámara sana a la tabla -- solo le agrega contexto a una fila
+    que ya iba a existir por otra razón.
     """
+    observaciones = fila.get("observaciones", [])
+
     if fila["log_estado"] == "ERROR":
-        etiqueta, color, orden = _etiqueta_sin_respuesta(fila["log_motivo"])
-        motivo = _sin_codigo_error(fila["log_motivo"] or "")
+        etiqueta, color, orden, motivo = _etiqueta_sin_respuesta(fila["log_motivo"])
+        motivo = _con_observaciones(motivo, observaciones)
         return [(orden, CamaraFalla(fila["camara"], color, etiqueta, motivo))]
 
     resultados: list[tuple[int, CamaraFalla]] = []
     ruta_base, ruta_actual = _rutas_imagenes(cliente, planta, servidor, fila["camara"], fecha)
 
     if fila["estado_actual"] == "rojo":
-        motivo = _sin_codigo_error(fila["imagen_motivo"] or "Confirmado por un humano")
+        motivo = _con_observaciones(
+            "Se confirmó que la cámara cambió de posición respecto a su imagen de referencia",
+            observaciones,
+        )
         resultados.append((_ORDEN_CAMARA_MOVIDA, CamaraFalla(
             fila["camara"], "rojo", "Cámara movida (confirmado)", motivo, ruta_base, ruta_actual,
         )))
     elif fila["estado_actual"] == "morado":
-        motivo = _sin_codigo_error(fila["imagen_motivo"] or "Desplazamiento por encima del umbral")
+        motivo = _con_observaciones(
+            "Se detectó un posible cambio de posición, pendiente de confirmar", observaciones,
+        )
         resultados.append((_ORDEN_PENDIENTE_REVISION, CamaraFalla(
             fila["camara"], "morado", "Pendiente de revisión", motivo, ruta_base, ruta_actual,
         )))
@@ -129,8 +202,8 @@ def _clasificar_falla(
         # Antes no contaba como falla (era un estado "en proceso", ya marcado por un humano) --
         # pedido 22/10/2026: ahora sí, para que la suma de las columnas del resumen cierre siempre
         # contra "Cámaras totales" y no quede ninguna cámara invisible en el reporte.
-        motivo = _sin_codigo_error(
-            fila["imagen_motivo"] or "Pendiente de que alguien suba una imagen limpia (ventana_bases.py)"
+        motivo = _con_observaciones(
+            "Pendiente de actualizar la imagen de referencia de esta cámara", observaciones,
         )
         dias_sin_resolver = (fecha - fila["estado_desde"]).days if fila["estado_desde"] else 0
         if dias_sin_resolver >= DIAS_BASE_DESACTUALIZADA_URGENTE:
@@ -155,17 +228,22 @@ def _clasificar_falla(
     # Caso real que lo originó: una base reemplazada por error con una foto de otra resolución, sin
     # que el .json base se enterara (son comparaciones independientes).
     if fila["imagen_status"] == "RESOLUCION DISTINTA":
+        motivo = _con_observaciones(
+            _motivo_resolucion_distinta(fila["imagen_motivo"]), observaciones,
+        )
         resultados.append((_ORDEN_RESOLUCION_DISTINTA, CamaraFalla(
-            fila["camara"], "rojo", "Cambio de resolución", fila["imagen_motivo"] or "",
+            fila["camara"], "rojo", "Cambio de resolución", motivo,
         )))
 
     # Eje de configuración (ROADMAP.md, 28/10/2026) -- independiente también. `config_estado_actual`
     # es el estado vivo de `perfil_camara` (igual patrón que estado_actual/rojo): se queda en
     # "incidencia" sin volver a preguntar hasta que se resuelva (ver pedir_revision_config()).
     if fila["config_estado_actual"] == "incidencia":
+        diferencias = fila["config_diferencias"] or []
+        motivo = _con_observaciones(_motivo_config_cambio(diferencias), observaciones)
         resultados.append((_ORDEN_CONFIG_CAMBIO, CamaraFalla(
-            fila["camara"], "rojo", "Cambió la configuración", "",
-            config_diferencias=fila["config_diferencias"] or [],
+            fila["camara"], "rojo", "Cambió la configuración", motivo,
+            config_diferencias=diferencias,
         )))
 
     return resultados
@@ -238,8 +316,8 @@ def _resumen_servidor(conn, cliente: str, planta: str, servidor: str, fecha: dat
     with conn.cursor() as cur:
         cur.execute(
             """
-            SELECT p.camara, p.estado_actual, p.dias_no_concluyente_consecutivos, p.estado_desde,
-                   p.config_estado_actual,
+            SELECT p.id, p.camara, p.estado_actual, p.dias_no_concluyente_consecutivos,
+                   p.estado_desde, p.config_estado_actual,
                    h.imagen_status, h.imagen_motivo, h.config_diferencias, h.log_estado, h.log_motivo
             FROM historial_comparacion h JOIN perfil_camara p ON p.id = h.camara_id
             WHERE p.cliente = %s AND p.planta = %s AND p.servidor = %s AND h.fecha = %s
@@ -249,6 +327,14 @@ def _resumen_servidor(conn, cliente: str, planta: str, servidor: str, fecha: dat
         )
         columnas = [d.name for d in cur.description]
         filas = [dict(zip(columnas, f)) for f in cur.fetchall()]
+
+    # Una sola consulta para todas las cámaras del servidor (ROADMAP.md, 29/10/2026) en vez de una
+    # por cámara -- misma bitácora que alimenta `ventana_revision.py` (`observacion_camara`).
+    observaciones_por_camara = observaciones_para_reporte(
+        conn, [f["id"] for f in filas], fecha, DIAS_OBSERVACION_RESUELTA_VISIBLE,
+    )
+    for f in filas:
+        f["observaciones"] = observaciones_por_camara.get(f["id"], [])
 
     # Cada cámara puede aportar 0, 1 o 2 fallas (imagen y configuración son ejes independientes,
     # ROADMAP.md 28/10/2026) -- se aplanan todas y se ordenan por la prioridad acordada con el

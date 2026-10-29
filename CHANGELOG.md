@@ -5,6 +5,30 @@ fecha en vez de versión (este proyecto no se publica como paquete). Es un regis
 qué cambió y cuándo -- el *por qué* de cada decisión está en [ROADMAP.md](ROADMAP.md), que sigue
 siendo la fuente de verdad del proyecto.
 
+## 2026-10-29
+
+### Cambiado
+
+- PDF del reporte, tabla "Cámaras con Falla": la columna "Motivo" ahora muestra una frase amigable
+  (ej. `"No se pudo establecer conexión con la cámara"` en vez de `"Puerto 80 Timed out [111]"`) --
+  pedido tras ver que un gerente de planta no entendía el detalle técnico original. El texto crudo
+  completo (con código de error incluido) se sigue guardando igual en
+  `historial_comparacion.log_motivo`/`imagen_motivo`, soporte lo sigue consultando ahí. La fila
+  "Cambió la configuración" deja de mostrar el "Motivo" vacío -- ahora resume qué categorías
+  cambiaron (Imagen/Video/Compresión/Red); el detalle campo por campo se sigue viendo igual abajo.
+- PDF del reporte: la bitácora de `observacion_camara` (hasta ahora invisible en el reporte) se
+  agrega debajo del "Motivo" de cada cámara con falla, como "Observaciones:" con fecha por línea, de
+  la más vieja a la más nueva. Las resueltas se muestran tachadas y siguen visibles 15 días desde la
+  fecha del reporte (no desde la fecha real de corrida); después de esa ventana dejan de aparecer.
+  Nueva `db.observaciones_para_reporte()` (antes `observaciones_activas()`, solo traía las activas).
+
+### Corregido
+
+- `comparacion/image_compare.py`, `_orb_ransac()`: con exactamente 1 inlier sobreviviendo RANSAC,
+  `cv2.estimateAffinePartial2D` (dentro de `_descomponer_transformacion`) tronaba `main.py` a medio
+  reporte -- exige mínimo 2 puntos y la validación previa solo cubría 0. Pasó en producción hoy
+  (`AbInBev/ZACATECAS/QLYMSPROD02/C2p`). Corregido cambiando la validación de `== 0` a `< 2`.
+
 ## 2026-10-28
 
 ### Documentado

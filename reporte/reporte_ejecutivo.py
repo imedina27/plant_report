@@ -115,8 +115,9 @@ class CamaraFalla:
     camara: str
     estado: str  # color de la celda -- "rojo" | "ambar" | "morado" | "base_desactualizada"
     etiqueta: str  # texto que se muestra en "Estado" (ej. "Cámara sin respuesta") -- descriptivo, no el color crudo
-    motivo: str  # detalle técnico, sin el código de error final (no es relevante para el cliente,
-    # ver datos_reporte._sin_codigo_error -- ROADMAP.md 28/10/2026)
+    motivo: str  # frase amigable para quien no conoce el detalle técnico -- el texto crudo completo
+    # se sigue guardando en la base de datos (ver datos_reporte._etiqueta_sin_respuesta/_motivo_* --
+    # ROADMAP.md 29/10/2026)
     ruta_base: Path | None = None  # None = sin imagen que mostrar (ej. cámara sin respuesta ese día)
     ruta_actual: Path | None = None
     # Campos que cambiaron en la configuración (mismo formato que config_compare.compare():

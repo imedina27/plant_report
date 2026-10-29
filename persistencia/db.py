@@ -332,6 +332,44 @@ def crear_observacion(conn: psycopg2.extensions.connection, camara_id: int, text
         )
 
 
+def observaciones_para_reporte(
+    conn: psycopg2.extensions.connection, camara_ids: list[int], fecha: datetime.date,
+    dias_resuelta_visible: int,
+) -> dict[int, list[dict]]:
+    """`{camara_id: [{"texto", "creado_en", "resuelta"}, ...]}`, en orden cronológico -- para el
+    reporte ejecutivo (ROADMAP.md, 29/10/2026). Trae las observaciones activas (`resuelta_en IS
+    NULL`) más las resueltas en los últimos `dias_resuelta_visible` días -- después de esa ventana
+    una observación resuelta deja de aparecer (acordado con el usuario, pedido 29/10/2026).
+
+    La ventana se cuenta contra `fecha` (la fecha del **reporte**, no la fecha real en que se corre
+    esto) para que un reporte de una fecha vieja se vea igual sin importar cuándo se regenere --
+    mismo criterio que `dias_sin_resolver` en `datos_reporte._clasificar_falla()`.
+
+    Hoy nada en este repo cierra una observación (ver `crear_observacion`), así que en la práctica
+    esto siempre trae todas las que existan (todas con `resuelta_en IS NULL`) -- queda listo para
+    cuando exista el programa de administración aparte que sí las cierre. Cámaras sin ninguna no
+    aparecen como llave."""
+    if not camara_ids:
+        return {}
+    limite = fecha - datetime.timedelta(days=dias_resuelta_visible)
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT camara_id, texto, creado_en, resuelta_en
+            FROM observacion_camara
+            WHERE camara_id = ANY(%s) AND (resuelta_en IS NULL OR resuelta_en::date >= %s)
+            ORDER BY camara_id, creado_en
+            """,
+            (camara_ids, limite),
+        )
+        resultado: dict[int, list[dict]] = {}
+        for camara_id, texto, creado_en, resuelta_en in cur.fetchall():
+            resultado.setdefault(camara_id, []).append(
+                {"texto": texto, "creado_en": creado_en, "resuelta": resuelta_en is not None}
+            )
+        return resultado
+
+
 def marcar_base_reemplazada(conn: psycopg2.extensions.connection, cliente: str, planta: str,
                              servidor: str, camara: str) -> None:
     """Confirma el reemplazo de una base: la cámara vuelve a verde (ROADMAP.md, sección 2.8), y
