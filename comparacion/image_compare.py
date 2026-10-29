@@ -168,8 +168,12 @@ def _orb_ransac(img1: np.ndarray, img2: np.ndarray, mask: np.ndarray) -> dict:
         return {"inliers": 0, "desp": None, **_SIN_TRANSFORMACION}
 
     inlier_mask = inlier_mask.ravel().astype(bool)
-    if inlier_mask.sum() == 0:
-        return {"inliers": 0, "desp": None, **_SIN_TRANSFORMACION}
+    if inlier_mask.sum() < 2:
+        # cv2.estimateAffinePartial2D (_descomponer_transformacion) exige mínimo 2 puntos --
+        # traslación+rotación+escala son 4 incógnitas, 1 solo punto no alcanza para resolverlas.
+        # Bug real (29/10/2026): con exactamente 1 inlier sobreviviendo RANSAC, la validación de
+        # abajo (antes solo `== 0`) no lo atajaba y tronaba main.py a medio reporte.
+        return {"inliers": int(inlier_mask.sum()), "desp": None, **_SIN_TRANSFORMACION}
     p1_in, p2_in = p1[inlier_mask], p2[inlier_mask]
     disp = np.linalg.norm(p1_in - p2_in, axis=1)
     return {
