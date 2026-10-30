@@ -3047,4 +3047,71 @@ paso acordado: entender bien cómo está hecha la v1 actual antes de decidir qu�
     resueltas. `db.observaciones_activas_de_camara()` se reemplazó por
     `db.observaciones_vigentes_de_camara()` (mismo criterio que `observaciones_para_reporte()` pero
     para una sola cámara y contra `CURRENT_DATE`). Probado contra `BASE3` real: aparece tachada con
+    el botón deshabilitado, confirmado leyendo la BD.
+
+- **Reporte mensual completo por cliente (29/10/2026)**: pedido del usuario -- un reporte manual, a
+  petición del cliente, que liste TODAS sus cámaras sin importar estado (a diferencia del reporte
+  diario, que solo detalla fallas de un día puntual), con sus observaciones **creadas ese mes**
+  (resueltas o no). No depende de que haya corrido el pipeline diario -- usa el estado más reciente
+  conocido (`perfil_camara.estado_actual`) en vez del histórico de un día. No se envía por correo;
+  es bajo demanda (`scripts/reporte_mensual_cliente.py --client <X> [--month N] [--year N]`).
+  - **Diseño acordado con el usuario antes de programar**: observaciones por fecha de creación
+    dentro del mes (no por vigencia); estado de cámara = el más reciente en vivo; imágenes Base/Hoy
+    solo para cámaras con falla de imagen confirmada o pendiente de revisión (igual criterio que el
+    reporte diario) -- meter fotos de las ~300 cámaras de un cliente haría un PDF enorme; resumen de
+    servidores (CPU/GPU/disco/Vision-Stream) igual que el diario; nombre de archivo
+    `REPORTES_ROOT/<cliente>/<cliente>_<mes><año>_completo.pdf`. Sin tablas nuevas en la BD -- solo
+    consultas nuevas (`db.listar_camaras_con_estado`, `db.observaciones_del_mes_por_camara`) y una
+    función de armado nueva (`datos_reporte.generar_reporte_mensual_cliente`), reutilizando
+    `MetricaServidor`/`MontajeDisco`/`_tabla_vision_stream`/`_fila_imagenes` de `reporte_ejecutivo.py`
+    sin cambios. Tabla nueva en el PDF: "TODAS LAS CÁMARAS" (Cámara/Estado/Observaciones del mes) en
+    vez de "Cámaras con Falla" -- cada servidor tiene hoja de detalle siempre (a diferencia del
+    diario, que solo la crea si hay algo que reportar).
+  - **Probado contra AbInBev real** (238 cámaras, mes en curso): 2 cámaras en rojo con imágenes
+    Base/Hoy correctas, 29 cámaras con 31 observaciones del mes, verificado por lectura directa de
+    la BD antes de generar el PDF.
+  - **Bug real encontrado por el usuario al revisar el PDF: "cámaras fantasma" (28/10/2026) rompiendo
+    el conteo de servidores**. El PDF mostraba 16 servidores para AbInBev; el usuario señaló que son
+    11. Causa: 5 servidores (`QLYMSPROD03/04/05/06/11`) tienen su planta duplicada solo por
+    mayúsculas/minúsculas en `perfil_camara` (`Apan`/`APAN`, `Medellin`/`MEDELLIN`,
+    `Tocancipa`/`TOCANCIPA`, `Tuxtepec`/`TUXTEPEC`, `Atlantico`/`ATLANTICO`) -- confirmado contra la
+    BD real. El agrupamiento original (`(planta, servidor)` con coincidencia exacta de texto, igual
+    que `_servidores_del_cliente()` del reporte diario) partía cada uno en 2 filas con las cámaras
+    repartidas. **Corregido** agrupando por `(servidor, MAYÚSCULAS(planta))` en
+    `generar_reporte_mensual_cliente()` -- sin tocar la BD, solo la vista de este reporte. Cada
+    cámara sigue usando su propia `planta` real (no la del grupo) para ubicar sus imágenes --
+    fusionar el rótulo de pantalla no debía romper ninguna ruta de archivo. Vision-Stream
+    (`_vision_stream_mas_reciente_servidor`) se simplificó para filtrar solo por servidor (ya
+    confirmado único, sin variantes) en vez de por planta, por la misma razón. Reprobado contra
+    AbInBev real: 11 servidores, totales de cámaras cierran (ej. APAN 9+11=20, TUXTEPEC 18+18=36).
+    **Nota para el futuro**: el reporte diario (`_servidores_del_cliente`/`_clientes_del_dia` en
+    `datos_reporte.py`) tiene la misma coincidencia exacta de texto -- probablemente cuenta de más
+    los servidores de estos mismos 5 casos también, no se tocó (fuera del pedido de hoy).
+  - **Bug real de ReportLab encontrado por el usuario: borde de cierre perdido y una hoja en blanco
+    al cortar una tabla larga entre 3+ hojas**. El usuario vio el borde grueso de "RESUMEN DE
+    SERVIDORES" sin cerrar entre dos hojas, y luego una hoja completamente vacía (solo encabezado/
+    pie) en la hoja de detalle de `QLYMSPROD02` (48 cámaras). Se verificó primero que el bug YA
+    pasaba con la tabla **original, sin modificar** del reporte diario (`_tabla_resumen_servidores`)
+    forzada a cortarse entre 2 hojas con datos sintéticos -- no era un bug nuevo introducido hoy.
+    **Causa raíz** (confirmada leyendo `tables.py` de ReportLab): el arreglo del 28/10/2026
+    (`_estilo_base_tabla`, literales + `"splitfirst"`/`"splitlast"`) solo funciona en el **primer**
+    corte de una tabla -- `Table.split()` descarta las instrucciones de línea con marcador especial
+    al armar el pedazo que continúa (`_cr_1_0(..., _srflMode=False)`, a diferencia de los comandos
+    de fondo de color, que sí se preservan con `_srflMode=True`). Una tabla que necesita un
+    **segundo** corte (3+ hojas) pierde el borde ahí, y en un caso real (`QLYMSPROD02`, 48 cámaras)
+    ese segundo corte dejó una hoja entera sin ninguna fila -- confirmado instrumentando el armado
+    real del PDF (`onPage` + marcadores de dibujo) para ubicar exactamente qué servidor caía en la
+    hoja vacía. Nunca se había visto antes porque el reporte diario rara vez necesita una tabla de
+    3+ hojas (menos filas, solo fallas); el reporte mensual sí, porque lista TODO el catálogo.
+    **Arreglo**: nueva `_tablas_paginadas()` en `reporte_ejecutivo.py` -- reparte los items a mano en
+    tablas "completas" por hoja (midiendo la altura real con `Table.wrap()` antes de dibujar, con
+    `PageBreak()` entre cada una) en vez de darle a ReportLab una sola tabla larga. Cada pedazo
+    nunca se corta solo, así que su borde (ya definido en `_estilo_base_tabla`, sin tocarla) siempre
+    cierra, y de paso el encabezado de columna se repite en cada hoja (antes no, al cortar solo).
+    Aplicado a "RESUMEN DE SERVIDORES" y "TODAS LAS CÁMARAS" -- las únicas 2 tablas del reporte
+    mensual con filas suficientes para necesitar 2+ hojas. **No se tocó** `_tabla_resumen_servidores`/
+    `_tabla_fallas_servidor` del reporte diario (mismo riesgo latente si algún cliente tuviera
+    suficientes fallas/servidores para un segundo corte, pero no es parte de este pedido). Reprobado
+    contra AbInBev real: 19 hojas, sin bordes faltantes ni hojas en blanco (confirmado por el
+    usuario).
     el botón deshabilitado, tal como se pidió.

@@ -17,8 +17,19 @@ import re
 from comparacion.image_compare import CHECK_PLANTS_ROOT
 from comparacion.image_compare import base_path as ruta_base_imagen
 from integraciones import monit_client
-from persistencia.db import observaciones_para_reporte
-from reporte.reporte_ejecutivo import CamaraFalla, ResumenServidor, construir_pdf
+from persistencia.db import (
+    listar_camaras_con_estado,
+    observaciones_del_mes_por_camara,
+    observaciones_para_reporte,
+)
+from reporte.reporte_ejecutivo import (
+    CamaraFalla,
+    CamaraInventario,
+    ResumenServidor,
+    ResumenServidorMensual,
+    construir_pdf,
+    construir_pdf_mensual,
+)
 
 load_dotenv()
 
@@ -413,3 +424,155 @@ def generar_reportes_del_dia(conn, fecha: date, cliente: str | None = None) -> d
         construir_pdf(cliente, fecha, servidores, ruta)
         rutas[cliente] = ruta
     return rutas
+
+
+# ---------------------------------------------------------------------------
+# Reporte mensual completo (pedido 29/10/2026, ver ROADMAP.md): a diferencia de
+# generar_reportes_del_dia() (un día puntual, solo cámaras con falla), este reporte es manual, a
+# petición del cliente, y lista TODAS sus cámaras sin importar estado, con las observaciones
+# creadas ese mes -- resueltas o no. El estado de cada cámara es el más reciente conocido
+# (perfil_camara.estado_actual), no el de un día del histórico.
+# ---------------------------------------------------------------------------
+
+_MESES_ES = [
+    "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+    "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
+]
+
+_ETIQUETA_ESTADO_CAMARA = {
+    "verde": "OK",
+    "amarillo": "No concluyente",
+    "rojo": "Cámara movida (confirmado)",
+    "morado": "Pendiente de revisión",
+    "base_desactualizada": "Base de imágenes desactualizada",
+}
+
+# Imágenes Base/Hoy solo para cámaras con falla de imagen confirmada o pendiente de revisión
+# (acordado con el usuario, 29/10/2026) -- el resto del catálogo no las necesita, y meter fotos de
+# cientos de cámaras en un solo PDF lo haría enorme y lento de generar.
+_ESTADOS_CON_IMAGEN_MENSUAL = {"rojo", "morado"}
+
+
+def _resolver_cliente_catalogo(conn, cliente: str) -> str | None:
+    """Igual que `_resolver_cliente()`, pero contra el catálogo completo de `perfil_camara` en vez
+    de `historial_comparacion` de una fecha -- este reporte no depende de que haya corrido el
+    pipeline un día en particular. `None` si el cliente no existe en el catálogo (typo o
+    mayúsculas distintas)."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT DISTINCT cliente FROM perfil_camara WHERE LOWER(cliente) = LOWER(%s)",
+            (cliente,),
+        )
+        fila = cur.fetchone()
+        return fila[0] if fila else None
+
+
+def _etiqueta_estado_camara(estado_actual: str) -> str:
+    return _ETIQUETA_ESTADO_CAMARA.get(estado_actual, estado_actual)
+
+
+def _rutas_imagenes_si_aplica(
+    cliente: str, planta: str, servidor: str, camara: str, estado_actual: str,
+) -> tuple[Path | None, Path | None]:
+    if estado_actual not in _ESTADOS_CON_IMAGEN_MENSUAL:
+        return None, None
+    return _rutas_imagenes(cliente, planta, servidor, camara, date.today())
+
+
+def _texto_observaciones_mes(observaciones: list[dict]) -> str:
+    """Formato igual que `_con_observaciones()` (negrita/tachado por fecha), pero sin el motivo ni
+    el encabezado "Observaciones:" -- aquí toda la celda de la tabla ya es la columna de
+    observaciones, no hace falta repetir la etiqueta."""
+    if not observaciones:
+        return "Sin observaciones este mes"
+    lineas = []
+    for obs in observaciones:
+        texto = f"<strike>{obs['texto']}</strike>" if obs["resuelta"] else obs["texto"]
+        lineas.append(f"{obs['creado_en']:%d/%m/%Y}: {texto}")
+    return "<br/>".join(lineas)
+
+
+def _vision_stream_mas_reciente_servidor(conn, cliente: str, servidor: str) -> list[tuple[int, str]]:
+    """Igual que `_vision_stream_servidor()`, pero el último estado conocido de cada puerto sin
+    importar qué día se vio por última vez -- este reporte no está atado a una fecha del histórico.
+    Filtra solo por cliente/servidor, sin planta (a diferencia de `_vision_stream_servidor`) -- el
+    nombre de servidor ya es único por sí solo (confirmado contra la base real), y la planta tiene
+    variantes de mayúsculas/minúsculas conocidas ("cámaras fantasma", ROADMAP.md 28/10/2026) que
+    podrían dejar fuera lecturas guardadas con la otra variante."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT DISTINCT ON (si.puerto) si.puerto, hsi.estado
+            FROM historial_servicio_ia hsi JOIN servicio_ia si ON si.id = hsi.servicio_id
+            WHERE si.cliente = %s AND si.servidor = %s
+            ORDER BY si.puerto, hsi.fecha DESC
+            """,
+            (cliente, servidor),
+        )
+        return cur.fetchall()
+
+
+def _resumen_servidor_mensual(
+    conn, cliente: str, planta: str, servidor: str, camaras: list[dict],
+    observaciones_por_camara: dict[int, list[dict]],
+) -> ResumenServidorMensual:
+    """`planta` es el rótulo ya normalizado del grupo (ver `generar_reporte_mensual_cliente` --
+    mayúsculas, para fusionar variantes de un mismo servidor); cada cámara sigue usando SU PROPIA
+    `fila["planta"]` (la real, tal cual está en `perfil_camara`) para ubicar sus imágenes -- fusionar
+    el rótulo del grupo no debe romper la ruta real de archivos de ninguna cámara individual."""
+    inventario = [
+        CamaraInventario(
+            camara=fila["camara"],
+            estado=fila["estado_actual"],
+            etiqueta=_etiqueta_estado_camara(fila["estado_actual"]),
+            observaciones_texto=_texto_observaciones_mes(observaciones_por_camara.get(fila["id"], [])),
+            ruta_base=rb, ruta_actual=ra,
+        )
+        for fila in camaras
+        for rb, ra in [_rutas_imagenes_si_aplica(cliente, fila["planta"], servidor, fila["camara"], fila["estado_actual"])]
+    ]
+
+    temperaturas = monit_client.temperaturas_promedio_dia(servidor, date.today())
+    discos = monit_client.uso_disco_actual(servidor)
+    vision_stream = _vision_stream_mas_reciente_servidor(conn, cliente, servidor)
+
+    return ResumenServidorMensual(
+        nombre=servidor, planta=planta,
+        cpu=temperaturas["cpu"] if temperaturas else None,
+        gpu=temperaturas["gpu"] if temperaturas else None,
+        discos=discos, camaras=inventario, vision_stream=vision_stream,
+    )
+
+
+def generar_reporte_mensual_cliente(conn, cliente: str, anio: int, mes: int) -> Path | None:
+    """Reporte manual, a petición del cliente (ROADMAP.md, 29/10/2026): TODAS sus cámaras sin
+    importar estado, con sus observaciones creadas ese mes (resueltas o no). No se envía por
+    correo -- a diferencia de `generar_reportes_del_dia()`, esto no es parte de la corrida diaria,
+    es bajo demanda. `None` si el cliente no existe en el catálogo (typo o mayúsculas distintas)."""
+    cliente_real = _resolver_cliente_catalogo(conn, cliente)
+    if cliente_real is None:
+        return None
+
+    filas = listar_camaras_con_estado(conn, cliente_real)
+    observaciones = observaciones_del_mes_por_camara(conn, [f["id"] for f in filas], anio, mes)
+
+    # Agrupado por (servidor, planta en MAYÚSCULAS) -- no por el texto exacto de planta -- para
+    # fusionar servidores "fantasma" duplicados solo por mayúsculas/minúsculas en `perfil_camara`
+    # (ej. QLYMSPROD06/Tuxtepec y QLYMSPROD06/TUXTEPEC son el mismo servidor; confirmado contra la
+    # base real: 5 de los 16 pares (planta, servidor) de AbInBev eran así, 11 servidores reales).
+    # El nombre de servidor ya es único por sí solo -- no tiene este problema.
+    por_servidor: dict[tuple[str, str], list[dict]] = {}
+    for f in filas:
+        por_servidor.setdefault((f["servidor"], f["planta"].upper()), []).append(f)
+
+    servidores = [
+        _resumen_servidor_mensual(conn, cliente_real, planta, servidor, camaras_servidor, observaciones)
+        for (servidor, planta), camaras_servidor in sorted(por_servidor.items())
+    ]
+
+    carpeta_cliente = REPORTES_ROOT / cliente_real
+    carpeta_cliente.mkdir(parents=True, exist_ok=True)
+    periodo = f"{_MESES_ES[mes - 1]} {anio}"
+    ruta = carpeta_cliente / f"{cliente_real}_{mes:02d}{anio}_completo.pdf"
+    construir_pdf_mensual(cliente_real, periodo, servidores, ruta)
+    return ruta

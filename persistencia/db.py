@@ -349,6 +349,57 @@ def listar_camaras(conn: psycopg2.extensions.connection) -> list[dict]:
         ]
 
 
+def listar_camaras_con_estado(conn: psycopg2.extensions.connection, cliente: str) -> list[dict]:
+    """Todas las cámaras de un cliente con su `estado_actual` -- el más reciente conocido, sin
+    depender de que haya corrido el pipeline un día en particular -- para el reporte mensual
+    completo de `scripts/reporte_mensual_cliente.py` (ROADMAP.md, 29/10/2026). A diferencia de
+    `generar_reportes_del_dia()` (reporte diario), que solo ve cámaras con una fila en
+    `historial_comparacion` de una fecha puntual, este reporte lista el catálogo completo del
+    cliente sin importar su estado."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT id, planta, servidor, camara, estado_actual
+            FROM perfil_camara
+            WHERE cliente = %s
+            ORDER BY planta, servidor, camara
+            """,
+            (cliente,),
+        )
+        columnas = [d.name for d in cur.description]
+        return [dict(zip(columnas, f)) for f in cur.fetchall()]
+
+
+def observaciones_del_mes_por_camara(
+    conn: psycopg2.extensions.connection, camara_ids: list[int], anio: int, mes: int,
+) -> dict[int, list[dict]]:
+    """`{camara_id: [{"texto", "creado_en", "resuelta"}, ...]}` de las observaciones **creadas**
+    en un mes calendario -- resueltas o no -- para el reporte mensual completo (ROADMAP.md,
+    29/10/2026). A diferencia de `observaciones_para_reporte()` (ventana de 15 días contra la fecha
+    de un reporte diario), aquí se listan todas las del mes sin importar si ya se resolvieron o
+    hace cuánto (pedido del usuario: el reporte mensual es el registro completo del mes, no un
+    estado "vigente")."""
+    if not camara_ids:
+        return {}
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT camara_id, texto, creado_en, resuelta_en
+            FROM observacion_camara
+            WHERE camara_id = ANY(%s)
+              AND EXTRACT(YEAR FROM creado_en) = %s AND EXTRACT(MONTH FROM creado_en) = %s
+            ORDER BY creado_en
+            """,
+            (camara_ids, anio, mes),
+        )
+        resultado: dict[int, list[dict]] = {}
+        for camara_id, texto, creado_en, resuelta_en in cur.fetchall():
+            resultado.setdefault(camara_id, []).append(
+                {"texto": texto, "creado_en": creado_en, "resuelta": resuelta_en is not None}
+            )
+        return resultado
+
+
 def observaciones_vigentes_de_camara(
     conn: psycopg2.extensions.connection, camara_id: int, dias_resuelta_visible: int,
 ) -> list[dict]:

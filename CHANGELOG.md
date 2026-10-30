@@ -41,6 +41,10 @@ siendo la fuente de verdad del proyecto.
   `db.camara_tiene_observacion_vigente()`.
 - `C:\Users\Meki\Documents\ventana_observaciones.ps1`: lanzador fuera del repo para abrir
   `scripts/ventana_observaciones.py` desde la línea de comandos (ver `CLAUDE.local.md`).
+- `scripts/reporte_mensual_cliente.py`: reporte mensual completo de un cliente, bajo demanda --
+  TODAS sus cámaras sin importar estado, con sus observaciones creadas ese mes (resueltas o no). No
+  se envía por correo. Nuevas `db.listar_camaras_con_estado()`, `db.observaciones_del_mes_por_camara()`
+  y `datos_reporte.generar_reporte_mensual_cliente()`; tabla nueva en el PDF "TODAS LAS CÁMARAS".
 
 ### Corregido
 
@@ -48,6 +52,15 @@ siendo la fuente de verdad del proyecto.
   `cv2.estimateAffinePartial2D` (dentro de `_descomponer_transformacion`) tronaba `main.py` a medio
   reporte -- exige mínimo 2 puntos y la validación previa solo cubría 0. Pasó en producción hoy
   (`AbInBev/ZACATECAS/QLYMSPROD02/C2p`). Corregido cambiando la validación de `== 0` a `< 2`.
+- Reporte mensual completo: el conteo de servidores salía inflado (16 en vez de 11 para AbInBev) por
+  servidores "fantasma" duplicados solo por mayúsculas/minúsculas en la planta (`Apan`/`APAN`, etc.,
+  mismo bug de datos del 28/10/2026). Se agrupa ahora por `(servidor, MAYÚSCULAS(planta))` en vez de
+  coincidencia exacta de texto; Vision-Stream ya no depende de la planta, solo del servidor.
+- Reporte mensual completo: tabla "RESUMEN DE SERVIDORES"/"TODAS LAS CÁMARAS" perdía el borde de
+  cierre y, en un caso real, dejaba una hoja completamente en blanco al necesitar 3+ hojas físicas --
+  bug real de ReportLab (`Table.split()` descarta el estilo de borde al segundo corte de una misma
+  tabla). Arreglado paginando esas 2 tablas a mano (`_tablas_paginadas()`, nueva en
+  `reporte_ejecutivo.py`) en vez de depender del corte automático de ReportLab.
 
 ## 2026-10-28
 

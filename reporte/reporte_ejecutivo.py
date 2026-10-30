@@ -144,6 +144,30 @@ class ResumenServidor:
     vision_stream: list[tuple[int, str]] = field(default_factory=list)
 
 
+@dataclass
+class CamaraInventario:
+    """Una cámara en el reporte mensual completo (ROADMAP.md, 29/10/2026) -- a diferencia de
+    `CamaraFalla`, aparece sin importar su estado (el reporte mensual lista el catálogo completo
+    de un cliente, no solo fallas)."""
+    camara: str
+    estado: str  # mismo valor crudo de perfil_camara.estado_actual -- ver _COLOR_ESTADO
+    etiqueta: str  # texto amigable para "Estado" -- ver datos_reporte._etiqueta_estado_camara
+    observaciones_texto: str  # ya formateado (<br/>/<strike>) -- ver datos_reporte._texto_observaciones_mes
+    ruta_base: Path | None = None  # solo para "rojo"/"morado" (falla de imagen) -- ver datos_reporte._rutas_imagenes_si_aplica
+    ruta_actual: Path | None = None
+
+
+@dataclass
+class ResumenServidorMensual:
+    nombre: str
+    planta: str
+    cpu: MetricaServidor | None
+    gpu: MetricaServidor | None
+    discos: list[MontajeDisco]
+    camaras: list[CamaraInventario]
+    vision_stream: list[tuple[int, str]] = field(default_factory=list)
+
+
 def _p(texto: str, estilo: ParagraphStyle) -> Paragraph:
     return Paragraph(texto, estilo)
 
@@ -235,6 +259,28 @@ def _tabla_encabezado_detalle(cliente: str, planta: str, fecha: date, servidor: 
     data = [
         [logo] + _fila_campos("CLIENTE", cliente, "PLANTA", planta),
         [""] + _fila_campos("FECHA", fecha.strftime("%d/%m/%Y"), "SERVIDOR", servidor),
+    ]
+    t = Table(data, colWidths=_ANCHO_ENC_COLS)
+    t.setStyle(_estilo_encabezado(filas=2))
+    return t
+
+
+def _tabla_encabezado_resumen_mensual(cliente: str, periodo: str) -> Table:
+    """Hoja 1 del reporte mensual completo (ROADMAP.md, 29/10/2026) -- igual que
+    `_tabla_encabezado_resumen` pero con "PERIODO" (ej. "Octubre 2026") en vez de "FECHA": este
+    reporte no está atado a un día puntual."""
+    logo = Image(str(LOGO), width=90, height=70.6)
+    data = [[logo] + _fila_campos("CLIENTE", cliente, "PERIODO", periodo)]
+    t = Table(data, colWidths=_ANCHO_ENC_COLS)
+    t.setStyle(_estilo_encabezado(filas=1))
+    return t
+
+
+def _tabla_encabezado_detalle_mensual(cliente: str, planta: str, periodo: str, servidor: str) -> Table:
+    logo = Image(str(LOGO), width=90, height=70.6)
+    data = [
+        [logo] + _fila_campos("CLIENTE", cliente, "PLANTA", planta),
+        [""] + _fila_campos("PERIODO", periodo, "SERVIDOR", servidor),
     ]
     t = Table(data, colWidths=_ANCHO_ENC_COLS)
     t.setStyle(_estilo_encabezado(filas=2))
@@ -480,6 +526,110 @@ def _tabla_resumen_servidores(cliente: str, servidores: list[ResumenServidor]) -
     return t
 
 
+def _tabla_resumen_servidores_mensual(cliente: str, servidores: list[ResumenServidorMensual]) -> Table:
+    """Igual forma que `_tabla_resumen_servidores`, pero los conteos de cámaras salen del
+    inventario completo (`s.camaras`, TODAS sin importar estado) en vez de una lista de fallas --
+    no hay "fallas" en el reporte mensual, solo estados (ROADMAP.md, 29/10/2026)."""
+    servidores = sorted(servidores, key=lambda s: _clave_orden_servidor(cliente, s.nombre))
+    encabezados = [
+        _p(t, _ESTILO_ETQ) for t in
+        ["Servidor", "CPU", "GPU", "Disco(s)", "Cámaras\ntotales", "Cámaras\nOK",
+         "No\nconcluyente", "Cámaras\ncon problema"]
+    ]
+    data = [[_p("RESUMEN DE SERVIDORES", _ESTILO_BANDA)] + [""] * 7, encabezados]
+    for s in servidores:
+        ok = sum(1 for c in s.camaras if c.estado == "verde")
+        no_concluyentes = sum(1 for c in s.camaras if c.estado == "amarillo")
+        con_problema = len(s.camaras) - ok - no_concluyentes
+        data.append([
+            _p(f"{s.nombre}<br/><font size=7 color='#8A8A92'>{s.planta}</font>", _ESTILO_VAL),
+            _texto_metrica(s.cpu),
+            _texto_metrica(s.gpu),
+            _texto_discos(s.discos, _ANCHO_COL_DISCOS_PT - 12),
+            _celda_estado(str(len(s.camaras))),
+            _celda_estado(str(ok)),
+            _celda_estado(str(no_concluyentes)),
+            _celda_estado(str(con_problema)),
+        ])
+    anchos = [ANCHO_CONTENIDO_PT * f for f in (0.19, 0.11, 0.11, 0.18, 0.09, 0.09, 0.11, 0.12)]
+    t = Table(data, colWidths=anchos)
+    t.setStyle(TableStyle(_estilo_base_tabla(banda_colspan=8, filas=len(data))))
+    return t
+
+
+def _tabla_camaras_servidor(camaras: list[CamaraInventario]) -> Table:
+    """"TODAS LAS CÁMARAS" de un servidor -- o de un pedazo de él, ya recortado a lo que cabe en una
+    hoja (ver `_tablas_paginadas`, ROADMAP.md 29/10/2026) -- `camaras` debe venir ya en el orden
+    final, esta función no lo vuelve a ordenar. A diferencia de `_tabla_fallas_servidor`, que solo
+    lista `servidor.fallas`, aquí entra cada cámara sin importar su estado. Imágenes Base/Hoy solo
+    para las que tienen `ruta_base`/`ruta_actual` (cámara movida o pendiente de revisión -- ver
+    datos_reporte._rutas_imagenes_si_aplica)."""
+    data = [
+        [_p("TODAS LAS CÁMARAS", _ESTILO_BANDA), "", ""],
+        [_p("Cámara", _ESTILO_ETQ), _p("Estado", _ESTILO_ETQ), _p("Observaciones del mes", _ESTILO_ETQ)],
+    ]
+    filas_imagenes: list[int] = []
+    for c in camaras:
+        data.append([
+            _p(c.camara, _ESTILO_VAL),
+            _celda_estado(c.etiqueta, _COLOR_ESTADO.get(c.estado)),
+            _p(c.observaciones_texto, ParagraphStyle("obs_mes", parent=_ESTILO_VAL, alignment=1)),
+        ])
+        if c.ruta_base is not None and c.ruta_actual is not None:
+            filas_imagenes.append(len(data))
+            data.append([_fila_imagenes(c.ruta_base, c.ruta_actual), "", ""])
+
+    anchos = [ANCHO_CONTENIDO_PT * f for f in (0.22, 0.16, 0.62)]
+    t = Table(data, colWidths=anchos)
+    estilo = _estilo_base_tabla(banda_colspan=3, filas=len(data))
+    for fila_idx in filas_imagenes:
+        # Mismo tratamiento que _tabla_fallas_servidor para las filas de imagen (ROADMAP.md,
+        # 28/10/2026) -- span completo, sin fondo ni padding heredado de la banda.
+        estilo.append(("SPAN", (0, fila_idx), (2, fila_idx)))
+        estilo.append(("BACKGROUND", (0, fila_idx), (2, fila_idx), colors.white))
+        estilo.append(("LEFTPADDING", (0, fila_idx), (2, fila_idx), 0))
+        estilo.append(("RIGHTPADDING", (0, fila_idx), (2, fila_idx), 0))
+        estilo.append(("TOPPADDING", (0, fila_idx), (2, fila_idx), _GUTTER_IMAGENES_PT))
+        estilo.append(("BOTTOMPADDING", (0, fila_idx), (2, fila_idx), _GUTTER_IMAGENES_PT))
+    t.setStyle(TableStyle(estilo))
+    return t
+
+
+def _tablas_paginadas(construir, items: list, alto_primera_pt: float, alto_resto_pt: float, ancho_pt: float) -> list[Table]:
+    """Reparte `items` en tantas tablas "completas" (banda + encabezado + filas) como hagan falta
+    para que cada una quepa por sí sola en su hoja -- en vez de darle a ReportLab una sola tabla
+    larga y dejar que la corte él solo (ROADMAP.md, 29/10/2026).
+
+    Se encontraron 2 bugs reales de ReportLab al dejarlo cortar solo una tabla que necesita MÁS de
+    2 hojas (confirmado leyendo `tables.py`): (1) el borde grueso de cierre (`"splitfirst"`/
+    `"splitlast"` en `_estilo_base_tabla`) solo se preserva en el PRIMER corte -- `Table.split()`
+    descarta esas instrucciones de línea al armar el pedazo que sigue (`_cr_1_0(..., _srflMode=
+    False)`), así que el segundo corte en adelante pierde el borde; (2) en un caso real (AbInBev,
+    servidor con 48 cámaras) el segundo corte dejó una hoja completamente en blanco (solo
+    encabezado/pie, sin ninguna fila) -- confirmado instrumentando el armado real del PDF. Paginar
+    a mano evita los dos: cada pedazo es una tabla independiente, nunca se corta sola, así que el
+    borde (ya definido en `_estilo_base_tabla`) siempre cierra bien y nunca deja una hoja vacía.
+
+    `construir(subconjunto)` arma la tabla completa de un subconjunto de `items`, en el mismo orden
+    -- la banda y el encabezado de columna se repiten en cada pedazo (ventaja aparte: antes, al
+    cortar sola, ReportLab no repetía el encabezado de columna en la continuación)."""
+    tablas: list[Table] = []
+    resto = list(items)
+    alto_disponible = alto_primera_pt
+    while resto:
+        corte = len(resto)
+        tabla = construir(resto[:corte])
+        _, alto = tabla.wrap(ancho_pt, alto_disponible * 1000)
+        while alto > alto_disponible and corte > 1:
+            corte -= 1
+            tabla = construir(resto[:corte])
+            _, alto = tabla.wrap(ancho_pt, alto_disponible * 1000)
+        tablas.append(tabla)
+        resto = resto[corte:]
+        alto_disponible = alto_resto_pt
+    return tablas
+
+
 def _texto_vision_stream(vision_stream: list[tuple[int, str]]) -> Paragraph:
     """Todos los puertos de IA conocidos de un servidor en una sola celda, cada uno coloreado según
     su propio estado ese día (un servidor puede tener más de uno, ej. Api_Manzanillo con 4) --
@@ -641,6 +791,98 @@ def construir_pdf(cliente: str, fecha: date, servidores: list[ResumenServidor], 
             if s.fallas:
                 story.append(_tabla_fallas_servidor(s))
                 story.append(Spacer(1, 10))
+        return story
+
+    doc = _nuevo_doc()
+    doc.build(_armar_story())
+    contador_paginas["total"] = doc.page
+    doc = _nuevo_doc()
+    doc.build(_armar_story())
+
+
+def construir_pdf_mensual(
+    cliente: str, periodo: str, servidores: list[ResumenServidorMensual], ruta_salida: Path,
+) -> None:
+    """Reporte mensual completo de un cliente (ROADMAP.md, 29/10/2026): a diferencia de
+    `construir_pdf` (reporte diario, solo detalla servidores con alguna falla ese día), aquí
+    **todos** los servidores tienen hoja de detalle y esa hoja lista TODAS sus cámaras, sin
+    importar estado -- es un reporte manual, a petición del cliente, con el inventario completo y
+    las observaciones creadas ese mes. Mismo patrón de `PageTemplate`/conteo de hojas de
+    `construir_pdf` (ver ahí los comentarios de por qué)."""
+    servidores_ordenados = sorted(servidores, key=lambda s: _clave_orden_servidor(cliente, s.nombre))
+
+    alto_enc_resumen = _tabla_encabezado_resumen_mensual(cliente, periodo).wrap(ANCHO_CONTENIDO_PT, letter[1])[1]
+    alto_enc_detalle = _tabla_encabezado_detalle_mensual(cliente, "X", periodo, "X").wrap(ANCHO_CONTENIDO_PT, letter[1])[1]
+    alto_pie_resumen = _tabla_pie(cliente, 1, 1, _SIMBOLOGIA_RESUMEN).wrap(ANCHO_CONTENIDO_PT, 200)[1]
+    alto_pie_detalle = _tabla_pie(cliente, 1, 1, _SIMBOLOGIA_DETALLE).wrap(ANCHO_CONTENIDO_PT, 200)[1]
+    frame_alto_resumen = (
+        letter[1] - 2 * MARGEN_PT - alto_enc_resumen - alto_pie_resumen - _GAP_ENCABEZADO_PT
+    )
+    frame_alto_detalle = letter[1] - 2 * MARGEN_PT - alto_enc_detalle - alto_pie_detalle - _GAP_ENCABEZADO_PT
+
+    contador_paginas = {"total": 1}
+
+    def _on_resumen(canvas, doc):
+        encabezado = _tabla_encabezado_resumen_mensual(cliente, periodo)
+        pie = _tabla_pie(cliente, canvas.getPageNumber(), contador_paginas["total"], _SIMBOLOGIA_RESUMEN)
+        _dibujar_encabezado_pie(canvas, encabezado, pie)
+
+    def _hacer_on_detalle(servidor: ResumenServidorMensual):
+        def _on_detalle(canvas, doc):
+            encabezado = _tabla_encabezado_detalle_mensual(cliente, servidor.planta, periodo, servidor.nombre)
+            pie = _tabla_pie(cliente, canvas.getPageNumber(), contador_paginas["total"], _SIMBOLOGIA_DETALLE)
+            _dibujar_encabezado_pie(canvas, encabezado, pie)
+        return _on_detalle
+
+    def _nuevo_doc() -> BaseDocTemplate:
+        frame_resumen = Frame(
+            MARGEN_PT, MARGEN_PT + alto_pie_resumen, ANCHO_CONTENIDO_PT, frame_alto_resumen,
+            id="f_resumen_m", topPadding=0, bottomPadding=0, leftPadding=0, rightPadding=0,
+        )
+        plantillas = [PageTemplate(id="resumen_m", frames=[frame_resumen], onPage=_on_resumen)]
+        for i, s in enumerate(servidores_ordenados):
+            frame_detalle = Frame(
+                MARGEN_PT, MARGEN_PT + alto_pie_detalle, ANCHO_CONTENIDO_PT, frame_alto_detalle,
+                id=f"f_detalle_m_{i}", topPadding=0, bottomPadding=0, leftPadding=0, rightPadding=0,
+            )
+            plantillas.append(
+                PageTemplate(id=f"detalle_m_{i}", frames=[frame_detalle], onPage=_hacer_on_detalle(s))
+            )
+        doc = BaseDocTemplate(
+            str(ruta_salida), pagesize=letter,
+            leftMargin=MARGEN_PT, rightMargin=MARGEN_PT, topMargin=MARGEN_PT, bottomMargin=MARGEN_PT,
+        )
+        doc.addPageTemplates(plantillas)
+        return doc
+
+    def _armar_story() -> list:
+        story = []
+        tablas_resumen = _tablas_paginadas(
+            lambda subset: _tabla_resumen_servidores_mensual(cliente, subset),
+            servidores_ordenados, frame_alto_resumen, frame_alto_resumen, ANCHO_CONTENIDO_PT,
+        )
+        for j, tabla in enumerate(tablas_resumen):
+            if j > 0:
+                story.append(PageBreak())
+            story.append(tabla)
+
+        for i, s in enumerate(servidores_ordenados):
+            story.append(NextPageTemplate(f"detalle_m_{i}"))
+            story.append(PageBreak())
+            vs = _tabla_vision_stream(s)
+            story.append(vs)
+            story.append(Spacer(1, 10))
+            _, alto_vs = vs.wrap(ANCHO_CONTENIDO_PT, frame_alto_detalle * 1000)
+            camaras_ordenadas = sorted(s.camaras, key=lambda c: c.camara)
+            tablas_camaras = _tablas_paginadas(
+                _tabla_camaras_servidor, camaras_ordenadas,
+                frame_alto_detalle - alto_vs - 10, frame_alto_detalle, ANCHO_CONTENIDO_PT,
+            )
+            for j, tabla in enumerate(tablas_camaras):
+                if j > 0:
+                    story.append(PageBreak())
+                story.append(tabla)
+            story.append(Spacer(1, 10))
         return story
 
     doc = _nuevo_doc()
