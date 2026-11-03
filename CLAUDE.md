@@ -26,9 +26,9 @@ para lo específico de su máquina).
 - **Siempre** actualiza `CHANGELOG.md` después de cada interacción que termine en un cambio -- una
   línea breve por cambio relevante, con la fecha del día.
 - Actualiza también `README.md` si cambió algo del uso real del programa.
-- No hagas commit ni push a menos que se pida explícitamente. Cuando se pida, el patrón habitual
-  en este proyecto es: actualizar los `.md` primero, luego commit, luego push, en ese orden, en la
-  misma tanda.
+- Haz commit de forma automática después de cada cambio correcto, sin esperar a que se pida --
+  el patrón habitual en este proyecto es: actualizar los `.md` primero, luego commit, en la misma
+  tanda. El **push** sigue siendo solo bajo solicitud explícita, nunca automático.
 
 ## Antes de programar
 
