@@ -5,6 +5,27 @@ fecha en vez de versión (este proyecto no se publica como paquete). Es un regis
 qué cambió y cuándo -- el *por qué* de cada decisión está en [ROADMAP.md](ROADMAP.md), que sigue
 siendo la fuente de verdad del proyecto.
 
+## 2026-11-02
+
+### Corregido
+
+- `perfil_camara`/`servicio_ia`: el `UNIQUE (cliente, planta, servidor, camara/puerto)` distinguía
+  mayúsculas, así que una llamada con otra capitalización no chocaba con la fila real y podía crear
+  un perfil "fantasma" aparte -- el mismo bug de `revisar_bases.py` corregido el 28/10 (ver esa
+  fecha), pero sin ningún resguardo en la base misma. Encontrados 61 perfiles de cámara duplicados
+  (122 filas de 326), los 61 sobrantes del lote de `revisar_bases.py` del 27/10 que la limpieza de
+  datos del 28/10 no tocó (esa limpieza buscó el cliente mal escrito `AbINBEV`, no variantes de
+  `planta` dentro de `AbInBev` ya bien escrito). `migrations/0011_identidad_insensible_mayusculas.sql`
+  reemplaza ambos `UNIQUE` por un índice único sobre `lower(...)` de esas columnas; `persistencia/db.py`
+  (`obtener_camara()`, `marcar_base_reemplazada()`, `marcar_base_desactualizada_manual()`,
+  `limpiar_base_reemplazada()`, `guardar_estado_servicio_ia()`) ahora compara/upsertea por esas
+  mismas columnas normalizadas, para que una mayúscula distinta resuelva a la fila real en vez de
+  crear una nueva o, peor, fallar al no encontrar la fila tras el `ON CONFLICT`.
+- Corrección de datos de una sola vez: de los 61 perfiles duplicados, 2 (`AbInBev/Apan/QLYMSPROD03`,
+  cámaras `AD1R1` y `BX3`) tenían una observación en `observacion_camara` colgando de la fila
+  huérfana -- reasignada a la fila viva antes de borrar; ninguno tenía nada en
+  `historial_comparacion`. Las 61 filas huérfanas se borraron después.
+
 ## 2026-10-29
 
 ### Cambiado

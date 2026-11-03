@@ -3114,4 +3114,44 @@ paso acordado: entender bien cómo está hecha la v1 actual antes de decidir qu�
     suficientes fallas/servidores para un segundo corte, pero no es parte de este pedido). Reprobado
     contra AbInBev real: 19 hojas, sin bordes faltantes ni hojas en blanco (confirmado por el
     usuario).
+
+- **61 perfiles de cámara duplicados por mayúsculas, sin resguardo en la base (02/11/2026)**. Un
+  colega que también consulta esta base (solo lectura, desde otro proyecto) encontró 61 perfiles
+  duplicados en `perfil_camara` (122 de 326 filas), todos en 5 plantas de AbInBev (Apan, Atlántico,
+  Medellín, Tocancipa, Tuxtepec), creados el 27/10/2026 entre las 14:30 y las 14:39 y nunca más
+  tocados -- mismo origen que el bug de cámaras "fantasma" ya corregido el 28/10 (ver esa fecha):
+  sesiones de `scripts/revisar_bases.py` del 27/10 con `--plant` tecleado con otra capitalización
+  (ej. `Apan` en vez de `APAN`). La limpieza de datos del 28/10 solo buscó el `cliente` mal escrito
+  (`AbINBEV`), así que estas 61 variantes de `planta` dentro de `AbInBev` ya bien escrito quedaron
+  sin detectar.
+  - **Causa raíz real, más allá de `revisar_bases.py`**: el `UNIQUE (cliente, planta, servidor,
+    camara)` de `perfil_camara` (y el equivalente de `servicio_ia`, `UNIQUE (cliente, planta,
+    servidor, puerto)`) nunca dejó de ser sensible a mayúsculas -- la corrección del 28/10 solo
+    normalizó el único punto de entrada conocido en ese momento (`revisar_bases.py`), pero
+    `persistencia/db.py` seguía sin ningún resguardo propio: `obtener_camara()`/
+    `guardar_estado_servicio_ia()` hacían `INSERT ... ON CONFLICT (cliente, planta, servidor, ...)
+    DO NOTHING` comparando los valores tal cual. Cualquier otro llamador futuro con una
+    capitalización distinta habría repetido el mismo bug.
+  - **Corregido**: `migrations/0011_identidad_insensible_mayusculas.sql` reemplaza ambos `UNIQUE`
+    por un índice único sobre `lower(cliente), lower(planta), lower(servidor), lower(camara|puerto)`
+    -- a nivel de base de datos, no solo de un script en particular. `persistencia/db.py`
+    (`obtener_camara()`, `marcar_base_reemplazada()`, `marcar_base_desactualizada_manual()`,
+    `limpiar_base_reemplazada()`, `guardar_estado_servicio_ia()`) ahora compara/upsertea por esas
+    mismas columnas normalizadas -- necesario no solo para el `ON CONFLICT`, sino también para los
+    `SELECT`/`UPDATE` que le siguen: sin esto, una llamada con otra capitalización ya no habría
+    creado un fantasma, pero habría fallado igual al no encontrar la fila con comparación exacta
+    tras el `ON CONFLICT` (peor que el bug original, un error en vez de un dato silenciosamente
+    duplicado).
+  - **Limpieza de datos de una sola vez**: re-verificado con SQL contra la base real antes de
+    borrar nada -- de los 61 duplicados, 2 (`AbInBev/Apan/QLYMSPROD03`, cámaras `AD1R1` y `BX3`,
+    ids huérfanos 1943 y 1945) tenían una fila en `observacion_camara` colgando de la fila huérfana;
+    ninguno tenía nada en `historial_comparacion`. Reasignadas esas 2 observaciones a la fila viva
+    (la de `actualizado_en` más reciente de cada grupo) antes de borrar las 61 filas huérfanas.
+    Confirmado después: 265 filas en `perfil_camara` (326 - 61), cero grupos duplicados, y
+    `obtener_camara()` probado en vivo con una capitalización deliberadamente distinta
+    (`ABINBEV`/`apan`/mayúsculas mezcladas) -- resuelve a la misma fila existente, sin crear una
+    nueva.
+  - **Pendiente**: `servicio_ia` recibió el mismo índice único insensible a mayúsculas de forma
+    preventiva, pero no se encontraron duplicados reales ahí (sus 3 valores de identidad vienen del
+    YAML de configuración, no de un CLI tecleado a mano, así que el riesgo era mucho menor).
     el botón deshabilitado, tal como se pidió.

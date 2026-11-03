@@ -36,7 +36,7 @@ def obtener_camara(conn: psycopg2.extensions.connection, cliente: str, planta: s
             """
             INSERT INTO perfil_camara (cliente, planta, servidor, camara)
             VALUES (%s, %s, %s, %s)
-            ON CONFLICT (cliente, planta, servidor, camara) DO NOTHING
+            ON CONFLICT (lower(cliente), lower(planta), lower(servidor), lower(camara)) DO NOTHING
             """,
             (cliente, planta, servidor, camara),
         )
@@ -46,7 +46,8 @@ def obtener_camara(conn: psycopg2.extensions.connection, cliente: str, planta: s
                    dias_borroso_consecutivos, p95_desplazamiento,
                    config_estado_actual, config_incidencia_desde
             FROM perfil_camara
-            WHERE cliente = %s AND planta = %s AND servidor = %s AND camara = %s
+            WHERE lower(cliente) = lower(%s) AND lower(planta) = lower(%s)
+              AND lower(servidor) = lower(%s) AND lower(camara) = lower(%s)
             """,
             (cliente, planta, servidor, camara),
         )
@@ -527,7 +528,8 @@ def marcar_base_reemplazada(conn: psycopg2.extensions.connection, cliente: str, 
             UPDATE perfil_camara
             SET estado_actual = 'verde', estado_desde = CURRENT_DATE,
                 base_reemplazada_el = CURRENT_DATE, actualizado_en = now()
-            WHERE cliente = %s AND planta = %s AND servidor = %s AND camara = %s
+            WHERE lower(cliente) = lower(%s) AND lower(planta) = lower(%s)
+              AND lower(servidor) = lower(%s) AND lower(camara) = lower(%s)
             RETURNING id, base_reemplazada_el
             """,
             (cliente, planta, servidor, camara),
@@ -549,7 +551,8 @@ def marcar_base_desactualizada_manual(conn: psycopg2.extensions.connection, clie
             UPDATE perfil_camara
             SET estado_actual = 'base_desactualizada', estado_desde = CURRENT_DATE,
                 actualizado_en = now()
-            WHERE cliente = %s AND planta = %s AND servidor = %s AND camara = %s
+            WHERE lower(cliente) = lower(%s) AND lower(planta) = lower(%s)
+              AND lower(servidor) = lower(%s) AND lower(camara) = lower(%s)
             """,
             (cliente, planta, servidor, camara),
         )
@@ -564,7 +567,8 @@ def limpiar_base_reemplazada(conn: psycopg2.extensions.connection, cliente: str,
             """
             UPDATE perfil_camara
             SET base_reemplazada_el = NULL, actualizado_en = now()
-            WHERE cliente = %s AND planta = %s AND servidor = %s AND camara = %s
+            WHERE lower(cliente) = lower(%s) AND lower(planta) = lower(%s)
+              AND lower(servidor) = lower(%s) AND lower(camara) = lower(%s)
             """,
             (cliente, planta, servidor, camara),
         )
@@ -582,14 +586,15 @@ def guardar_estado_servicio_ia(
             """
             INSERT INTO servicio_ia (cliente, planta, servidor, puerto, estado_actual, estado_desde)
             VALUES (%s, %s, %s, %s, %s, %s)
-            ON CONFLICT (cliente, planta, servidor, puerto) DO NOTHING
+            ON CONFLICT (lower(cliente), lower(planta), lower(servidor), puerto) DO NOTHING
             """,
             (cliente, planta, servidor, puerto, estado, fecha),
         )
         cur.execute(
             """
             SELECT id, estado_actual FROM servicio_ia
-            WHERE cliente = %s AND planta = %s AND servidor = %s AND puerto = %s
+            WHERE lower(cliente) = lower(%s) AND lower(planta) = lower(%s)
+              AND lower(servidor) = lower(%s) AND puerto = %s
             """,
             (cliente, planta, servidor, puerto),
         )
