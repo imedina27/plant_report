@@ -3179,6 +3179,6 @@ paso acordado: entender bien cómo está hecha la v1 actual antes de decidir qu�
     `base_reemplazada_el` en la fecha correcta; `.jpg` de base con fecha de modificación de hoy;
     mediana vieja borrada; historial reiniciado (un solo archivo, el de hoy); nota automática
     "Base reemplazada el 06/11/2026." en `observacion_camara`.
-  - Lanzador: `pr_cambiar_base.ps1` (fuera del repo, `C:\Users\Meki\Documents\`), mismo patrón sin
+  - Lanzador: `pr_imagen_base.ps1` (fuera del repo, `C:\Users\Meki\Documents\`), mismo patrón sin
     argumentos que `pr_observaciones.ps1`.
     el botón deshabilitado, tal como se pidió.

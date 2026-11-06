@@ -14,7 +14,7 @@ siendo la fuente de verdad del proyecto.
   Cámara), igual estructura que `scripts/ventana_observaciones.py`. El reemplazo se confirma de
   inmediato por cámara, con la misma lógica que `ui/ventana_bases.py` (copia la imagen, borra
   mediana/historial viejos, reinicia el historial y marca la cámara en verde). Lanzador:
-  `pr_cambiar_base.ps1`.
+  `pr_imagen_base.ps1`.
 
 ## 2026-11-02
 
