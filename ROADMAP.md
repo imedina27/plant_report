@@ -3154,4 +3154,31 @@ paso acordado: entender bien cómo está hecha la v1 actual antes de decidir qu�
   - **Pendiente**: `servicio_ia` recibió el mismo índice único insensible a mayúsculas de forma
     preventiva, pero no se encontraron duplicados reales ahí (sus 3 valores de identidad vienen del
     YAML de configuración, no de un CLI tecleado a mano, así que el riesgo era mucho menor).
+
+- **`scripts/cambiar_base_camara.py`: reemplazo de base fuera del flujo normal (06/11/2026)**.
+  Pedido: poder cambiar la imagen base de cualquier cámara sin pasar por `main.py` ni por
+  `ui/ventana_bases.py` (que solo lista las ya marcadas `base_desactualizada`) -- el caso real es
+  revisar varias cámaras después de generar un reporte, no solo las que el pipeline marcó solo.
+  - **Diseño acordado**: navegación tipo árbol (Cliente > Planta > Servidor > Cámara), misma
+    estructura que `scripts/ventana_observaciones.py` (29/10/2026) -- sin banderas de línea de
+    comandos, `db.listar_camaras()` carga el árbol completo de una vez. Un punto azul (mismo color
+    que el botón "Base Desactualizada" de `revisar_bases.py`) marca las cámaras que ya están en ese
+    estado, solo para ubicarlas rápido -- cualquier cámara se puede seleccionar igual, esté o no
+    marcada.
+  - **Diferencia deliberada con `ventana_observaciones.py`**: ahí los cambios quedan en memoria
+    hasta un botón final ("Aceptar"/"Guardar"), porque hay varios campos editables por cámara
+    (observaciones a resolver + texto nuevo). Aquí la acción es una sola ("esta es la nueva base"),
+    así que el reemplazo se confirma **de inmediato** al dar "Aceptar" por cámara -- igual que
+    `ui/ventana_bases.py`, sin paso de "guardar todo al final". Reutiliza tal cual la lógica de
+    `ui/ventana_bases.py._confirmar_reemplazo` (sin tocar ese archivo): `save_base()`,
+    `limpiar_base_mediana()`, `limpiar_historial_imagen()` + `guardar_historial_imagen()`,
+    `db.marcar_base_reemplazada()` (esta última ya deja sola la nota en la bitácora, agregada el
+    29/10/2026).
+  - **Probado contra datos reales**: reemplazo real de `AbInBev/TUXTEPEC/QLYMSPROD06/CLV`.
+    Verificado después contra la base y el disco: `estado_actual = 'verde'`, `estado_desde` y
+    `base_reemplazada_el` en la fecha correcta; `.jpg` de base con fecha de modificación de hoy;
+    mediana vieja borrada; historial reiniciado (un solo archivo, el de hoy); nota automática
+    "Base reemplazada el 06/11/2026." en `observacion_camara`.
+  - Lanzador: `pr_cambiar_base.ps1` (fuera del repo, `C:\Users\Meki\Documents\`), mismo patrón sin
+    argumentos que `pr_observaciones.ps1`.
     el botón deshabilitado, tal como se pidió.

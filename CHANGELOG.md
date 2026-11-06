@@ -5,6 +5,17 @@ fecha en vez de versión (este proyecto no se publica como paquete). Es un regis
 qué cambió y cuándo -- el *por qué* de cada decisión está en [ROADMAP.md](ROADMAP.md), que sigue
 siendo la fuente de verdad del proyecto.
 
+## 2026-11-06
+
+### Agregado
+
+- `scripts/cambiar_base_camara.py`: ventana para reemplazar la base de imagen de cualquier cámara
+  del catálogo, fuera del flujo normal -- navegación tipo árbol (Cliente > Planta > Servidor >
+  Cámara), igual estructura que `scripts/ventana_observaciones.py`. El reemplazo se confirma de
+  inmediato por cámara, con la misma lógica que `ui/ventana_bases.py` (copia la imagen, borra
+  mediana/historial viejos, reinicia el historial y marca la cámara en verde). Lanzador:
+  `pr_cambiar_base.ps1`.
+
 ## 2026-11-02
 
 ### Corregido
